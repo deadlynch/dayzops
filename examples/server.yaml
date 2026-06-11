@@ -1,0 +1,54 @@
+server:
+  name: "Chernarus Vanilla++"
+
+steam:
+  username: "USERNAME"
+
+instance:
+  map: "chernarusplus"
+  mission: "dayzOffline.chernarusplus"
+
+network:
+  game_port: 2302
+  steam_query_port: 27016
+
+paths:
+  root: "/srv/dayz"
+  server: "/srv/dayz/server"
+  workshop: "/srv/dayz/workshop"
+  backups: "/srv/dayz/backups"
+  logs: "/srv/dayz/logs"
+  state: "/srv/dayz/state"
+  custom: "/srv/dayz/custom"
+
+mods: []
+
+servermods: []
+
+managed_files: []
+
+managed_dirs: []
+
+backup:
+  enabled: true
+  retention_days: 14
+
+  include:
+    - profiles/**
+    - mpmissions/**
+    - battleye/**
+    - serverDZ.cfg
+    - custom/**
+
+logs:
+  retention_days: 30
+
+updates:
+  enabled: true
+  time: "04:00"
+
+healthcheck:
+  enabled: true
+
+state:
+  enabled: true
