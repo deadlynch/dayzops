@@ -1,236 +1,118 @@
 # Operations
 
-## Daily Operations
+Day-to-day runbook. For installation and configuration, see the
+[README](../README.md).
 
-### Server Status
-
-```bash
-dayzops status
-```
+## Status
 
 ```bash
-systemctl status dayz
+dayzops status            # service state, mod count, last update/backup
+systemctl status dayz     # systemd view of the server unit
 ```
 
----
-
-## Server Control
-
-### Start
+## Server control
 
 ```bash
 dayzops start
-```
-
-### Stop
-
-```bash
 dayzops stop
-```
-
-### Restart
-
-```bash
 dayzops restart
 ```
 
----
+These wrap `systemctl {start,stop,restart} dayz`.
 
-## Mod Management
-
-### Add Mod
+## Reconcile (declarative)
 
 ```bash
-dayzops mod add <workshop-id>
+dayzops apply --dry-run   # show what would change
+dayzops apply             # converge the system to server.yaml
 ```
 
-Example:
-
-```bash
-dayzops mod add 1559212036
-```
-
-### Remove Mod
-
-```bash
-dayzops mod remove <workshop-id>
-```
-
-### List Mods
-
-```bash
-dayzops mod list
-```
-
-### Synchronize Mods
-
-```bash
-dayzops mod sync
-```
-
-This operation:
-
-- Installs new mods
-- Updates existing mods
-- Removes deleted mods
-- Rebuilds startup parameters
-- Synchronizes keys
-
----
-
-## Key Synchronization
-
-```bash
-dayzops sync-keys
-```
-
-The operation:
-
-1. Removes existing keys
-2. Scans installed mods
-3. Finds all .bikey files
-4. Removes duplicates
-5. Rebuilds keys directory
-
----
+`apply` installs the server if missing, syncs mod symlinks, rebuilds keys and
+writes the systemd units — only for what diverged. It is idempotent.
 
 ## Updates
 
 ```bash
-dayzops update
+dayzops update            # runs nightly via dayz-update.timer
 ```
 
-Workflow:
+Atomic workflow, under a global lock, with automatic rollback:
 
 ```text
-backup
-↓
-stop
-↓
-update server
-↓
-update mods
-↓
-sync keys
-↓
-cleanup
-↓
-start
+lock → backup → stop → update server → update mods → validate
+     → rebuild keys → start → health check
 ```
 
----
+If validation fails, the backup is restored and the previous version is
+brought back up.
 
-## Backups
-
-Create backup:
-
-```bash
-dayzops backup
-```
-
-List backups:
-
-```bash
-dayzops backup list
-```
-
-Restore backup:
-
-```bash
-dayzops rollback <backup-name>
-```
-
----
-
-## Validation
-
-Validate configuration:
-
-```bash
-dayzops validate-config
-```
-
-Validate installation:
-
-```bash
-dayzops validate
-```
-
----
-
-## Health Checks
-
-```bash
-dayzops healthcheck
-```
-
-Validation includes:
-
-- Server process
-- Required files
-- Keys
-- Mods
-- Startup parameters
-- Network ports
-
----
-
-## Logs
-
-Application logs:
-
-```text
-/srv/dayz/logs
-```
-
-System logs:
-
-```bash
-journalctl -u dayz
-```
-
-Follow logs:
-
-```bash
-journalctl -u dayz -f
-```
-
----
-
-## Troubleshooting
-
-### Server Does Not Start
-
-```bash
-dayzops validate
-```
-
-```bash
-journalctl -u dayz -n 100
-```
-
-### Signature Errors
-
-```bash
-dayzops sync-keys
-```
-
-### Mod Not Loading
+## Mods
 
 ```bash
 dayzops mod list
+dayzops mod add 1559212036 --name CF     # client mod (--server for servermods)
+dayzops mod remove 1559212036
 ```
 
+After changing the mod list, run `dayzops apply` to converge symlinks and keys.
+Keys are rebuilt automatically during `apply` and `update` — there is no
+separate key command (full rebuild, per ADR-0004).
+
+## Backups
+
 ```bash
-dayzops mod sync
+dayzops backup            # create a backup now
+dayzops rollback          # restore the most recent backup and start the server
+dayzops prune             # delete backups older than backup.retention_days
 ```
 
-### Update Failure
+Backups are timestamped `.tar.gz` archives under `backups_dir`. Pruning also
+runs nightly via `dayz-prune.timer`.
+
+## Validation
 
 ```bash
-journalctl -u dayz-update
+dayzops validate-config   # check server.yaml (required fields, types)
 ```
 
+Installation readiness (binary, config, mod content present) is validated
+automatically as a step inside `update`; it is not a separate command.
+
+## Logs
+
 ```bash
+journalctl -u dayz -f          # server logs (live)
+journalctl -u dayz-update      # scheduled update logs
+journalctl -u dayz-prune       # scheduled prune logs
+```
+
+dayzops writes its own operational logs to stderr, captured by journald.
+
+## Troubleshooting
+
+**Server does not start** — check readiness and logs:
+
+```bash
+dayzops status
+journalctl -u dayz -n 100
+```
+
+**Signature / key errors** — rebuild keys by reconciling:
+
+```bash
+dayzops apply
+```
+
+**Mod not loading** — confirm it is declared and converged:
+
+```bash
+dayzops mod list
+dayzops apply --dry-run
+```
+
+**Update failed** — the rollback is automatic; inspect why:
+
+```bash
+journalctl -u dayz-update -n 100
 dayzops status
 ```
