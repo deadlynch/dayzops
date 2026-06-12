@@ -143,6 +143,15 @@ enable_updates() {
         log "AVISO: não foi possível habilitar os timers (systemd indisponível?)"
 }
 
+# Reafirma o dono de toda a árvore como o usuário de serviço. Passos anteriores
+# (pip, geração de units, cópia de config) rodam como root e podem deixar
+# arquivos com dono root dentro de ${DAYZ_HOME}; o servidor roda como
+# ${DAYZ_USER} e precisa ler/gravar tudo ali. Idempotente.
+fix_ownership() {
+    log "ajustando dono de ${DAYZ_HOME} para ${DAYZ_USER}:${DAYZ_USER}"
+    chown -R "${DAYZ_USER}:${DAYZ_USER}" "${DAYZ_HOME}"
+}
+
 main() {
     require_root
     create_dirs
@@ -153,6 +162,7 @@ main() {
     create_config
     create_env_file
     enable_updates
+    fix_ownership
     log "concluído. Edite ${CONFIG} (usuário Steam e mods) e /etc/dayzops.env (senha), depois rode: dayzops validate-config"
 }
 
