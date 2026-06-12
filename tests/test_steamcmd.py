@@ -96,3 +96,29 @@ def test_download_mod_handles_missing_path(monkeypatch, tmp_path):
     workshop = tmp_path / "workshop"
     sc.download_mod(42, workshop_dir=workshop)
     assert not (workshop / "42").exists()
+
+
+def test_runs_as_service_user_when_root(monkeypatch):
+    monkeypatch.delenv(STEAM_PASSWORD_ENV, raising=False)
+    monkeypatch.setattr("dayzops.steamcmd.os.geteuid", lambda: 0)  # finge root
+    sc = SteamCmd("alice", run_as="dayz")
+    cmd = sc.build_command(["+app_update", "223350"])
+    assert cmd[:3] == ["sudo", "-u", "dayz"]
+    assert "steamcmd" in cmd  # o binário vem depois do prefixo
+
+
+def test_no_sudo_wrap_when_not_root(monkeypatch):
+    monkeypatch.delenv(STEAM_PASSWORD_ENV, raising=False)
+    monkeypatch.setattr("dayzops.steamcmd.os.geteuid", lambda: 1000)  # não-root
+    sc = SteamCmd("alice", run_as="dayz")
+    cmd = sc.build_command(["+app_update", "223350"])
+    assert "sudo" not in cmd
+    assert cmd[0] == "steamcmd"
+
+
+def test_no_sudo_wrap_without_run_as(monkeypatch):
+    monkeypatch.delenv(STEAM_PASSWORD_ENV, raising=False)
+    monkeypatch.setattr("dayzops.steamcmd.os.geteuid", lambda: 0)
+    sc = SteamCmd("alice")  # sem run_as
+    cmd = sc.build_command([])
+    assert "sudo" not in cmd
