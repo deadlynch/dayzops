@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 
 from pathlib import Path
 
@@ -56,9 +57,15 @@ class SteamCmd:
         return shutil.which(self.steamcmd_path) is not None
 
     def _wrap_as_user(self, command: list[str]) -> list[str]:
-        """Prefixa 'sudo -u <run_as>' quando estamos como root e há usuário."""
+        """Prefixa 'sudo -H -u <run_as>' quando estamos como root e há usuário.
+
+        O -H ajusta HOME para o do usuário de serviço, o que é essencial: o
+        SteamCMD procura credencial cacheada (sentryfile do Steam Guard) em
+        $HOME/.steam. Sem -H, o HOME continua sendo /root e o login falha
+        pedindo Guard novamente — sem TTY para digitar.
+        """
         if self.run_as and hasattr(os, "geteuid") and os.geteuid() == 0:
-            return ["sudo", "-u", self.run_as, *command]
+            return ["sudo", "-H", "-u", self.run_as, *command]
         return command
 
     def _login_args(self) -> list[str]:
@@ -80,8 +87,36 @@ class SteamCmd:
         return ["***" if part == password else part for part in command]
 
     def _default_runner(self, command: list[str]):
-        return subprocess.run(
-            command, capture_output=True, text=True, timeout=self.timeout, check=False
+        """Roda o steamcmd repassando stdout/stderr em tempo real ao terminal.
+
+        Capturar tudo com capture_output=True faz três coisas ruins: esconde a
+        porcentagem do download (a operação parece 'travada'), tira o TTY
+        (alguns prompts do SteamCMD só aparecem com terminal) e a saída só
+        chega no fim. Aqui, fazemos line-buffering: cada linha vai ao terminal
+        ao mesmo tempo que é guardada em memória para o _link_workshop_item
+        (que precisa do caminho de download) e para a mensagem de erro.
+        """
+        proc = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        buf: list[str] = []
+        assert proc.stdout is not None
+        try:
+            for line in proc.stdout:
+                sys.stderr.write(line)
+                sys.stderr.flush()
+                buf.append(line)
+            returncode = proc.wait(timeout=self.timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            raise
+        return subprocess.CompletedProcess(
+            args=command, returncode=returncode, stdout="".join(buf), stderr=""
         )
 
     def run(self, steam_actions: list[str]):
