@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Shim para rodar o dayzops a partir do repositório, sem pip install.
+# Útil em desenvolvimento. Em produção, prefira `pip install .` (que cria o
+# comando `dayzops` no PATH via o entry-point do pyproject).
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec env PYTHONPATH="${ROOT}/src" python3 -m dayzops "$@"
