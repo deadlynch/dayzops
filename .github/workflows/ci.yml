@@ -7,9 +7,9 @@ on:
   pull_request:
 
 jobs:
-  # Suíte de testes num checkout LIMPO. É isto que pega arquivo novo que
-  # ficou de fora do commit: se faltar um módulo, o import quebra aqui —
-  # exatamente o caso do steamcmd.py que escapou na validação manual.
+  # Suíte de testes num checkout LIMPO, na matriz de versões suportadas.
+  # Pega arquivo novo que ficou de fora do commit, símbolo que sumiu de um
+  # módulo (ex.: troca de arquivos) e qualquer regressão de lógica.
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -30,11 +30,26 @@ jobs:
           pip install -e .
           pip install pytest
 
+      - name: Smoke de imports (falha rápido se um módulo não importa)
+        run: |
+          python - <<'PY'
+          import importlib, pkgutil
+          import dayzops
+          # importa todos os submódulos do pacote
+          for m in pkgutil.iter_modules(dayzops.__path__, "dayzops."):
+              importlib.import_module(m.name)
+          # garante os símbolos públicos de que o instalador e a CLI dependem
+          from dayzops.systemd import generate_units, ServerControl
+          from dayzops.steamcmd import SteamCmd
+          from dayzops.cli import main
+          print("imports ok")
+          PY
+
       - name: Rodar a suíte
         run: python -m pytest -q
 
-  # Integridade do empacotamento: bit de execução e sintaxe dos scripts.
-  # É isto que pega o que o pytest não vê — bin/dayzops sem +x ou ausente.
+  # Integridade dos scripts: presença, bit de execução, sintaxe e shellcheck.
+  # Pega o que o pytest não vê — script ausente ou sem +x.
   integrity:
     runs-on: ubuntu-latest
     steps:
@@ -42,7 +57,7 @@ jobs:
 
       - name: Scripts precisam estar versionados e executáveis
         run: |
-          for f in bin/dayzops scripts/install.sh; do
+          for f in bin/dayzops scripts/install.sh scripts/uninstall.sh; do
             if [ ! -f "$f" ]; then
               echo "::error::$f não está no repositório"
               exit 1
@@ -57,6 +72,7 @@ jobs:
         run: |
           bash -n bin/dayzops
           bash -n scripts/install.sh
+          bash -n scripts/uninstall.sh
 
       - name: Shellcheck (bloqueia em warning ou acima)
-        run: shellcheck --severity=warning scripts/install.sh bin/dayzops
+        run: shellcheck --severity=warning scripts/install.sh scripts/uninstall.sh bin/dayzops
