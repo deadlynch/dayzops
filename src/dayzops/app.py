@@ -122,3 +122,10 @@ def do_rollback(svc: Services, *, lock_file: Path = LOCK_FILE) -> None:
         svc.backup.restore()
         svc.control.start()
         log.info("rollback concluído")
+
+
+def do_prune(svc: Services) -> list:
+    """Remove backups além da retenção configurada (backup.retention_days)."""
+    retention = svc.config.get("backup", {}).get("retention_days", 14)
+    removed = svc.backup.prune(retention)
+    return removed

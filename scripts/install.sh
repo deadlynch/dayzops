@@ -118,11 +118,11 @@ YAML
     chown "${DAYZ_USER}:${DAYZ_USER}" "${CONFIG}"
 }
 
-# 7) Updates automáticos (habilita o timer)
+# 7) Agendamentos automáticos (habilita os timers)
 enable_updates() {
-    log "habilitando o timer de update automático"
-    systemctl enable --now dayz-update.timer || \
-        log "AVISO: não foi possível habilitar o timer (systemd indisponível?)"
+    log "habilitando os timers de update e prune"
+    systemctl enable --now dayz-update.timer dayz-prune.timer || \
+        log "AVISO: não foi possível habilitar os timers (systemd indisponível?)"
 }
 
 main() {

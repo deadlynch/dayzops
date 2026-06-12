@@ -20,7 +20,7 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="caminho do server.yaml")
     sub = parser.add_subparsers(dest="command")
     for name in ("version", "validate-config", "status", "update",
-                 "backup", "rollback", "start", "stop", "restart"):
+                 "backup", "rollback", "prune", "start", "stop", "restart"):
         sub.add_parser(name)
 
     apply_p = sub.add_parser("apply")
@@ -155,6 +155,12 @@ def _cmd_backup(svc: app.Services) -> int:
         return 1
 
 
+def _cmd_prune(svc: app.Services) -> int:
+    removed = app.do_prune(svc)
+    print(f"Prune: {len(removed)} backup(s) removido(s)")
+    return 0
+
+
 def _cmd_service_action(svc: app.Services, action: str) -> int:
     try:
         getattr(svc.control, action)()
@@ -210,6 +216,8 @@ def main(argv=None) -> int:
         return _cmd_rollback(svc)
     if command == "backup":
         return _cmd_backup(svc)
+    if command == "prune":
+        return _cmd_prune(svc)
     if command in ("start", "stop", "restart"):
         return _cmd_service_action(svc, command)
     if command == "apply":

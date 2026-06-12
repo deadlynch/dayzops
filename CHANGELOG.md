@@ -5,6 +5,23 @@ Todas as mudanças relevantes do projeto são documentadas aqui.
 O formato segue [Keep a Changelog](https://keepachangelog.com/) e o projeto
 adota [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [1.0.0] - 2026-06-12
+
+Versão de produção. O projeto roda do `install.sh` ao servidor no ar sem passo
+manual, e a retenção de backups passou a ser automática.
+
+### Added
+
+- Comando `dayzops prune`: remove backups além de `backup.retention_days`.
+- Units `dayz-prune.service` + `dayz-prune.timer`, geradas pelo próprio
+  dayzops e reconciliadas pelo `apply`.
+- Instalador `scripts/install.sh` (idempotente) e shim `bin/dayzops`.
+
+### Changed
+
+- `generate_units` e o estado desejado do `apply` agora incluem as units de
+  prune; o instalador habilita os dois timers.
+
 ## [0.9.0] - 2026-06-12
 
 Primeira versão funcional. A arquitetura que existia apenas como ADRs foi

@@ -8,6 +8,7 @@ log = get_logger("systemd")
 
 SERVER_SERVICE = "dayz"         # dayz.service  (systemctl start dayz)
 UPDATE_SERVICE = "dayz-update"  # dayz-update.service + dayz-update.timer
+PRUNE_SERVICE = "dayz-prune"    # dayz-prune.service + dayz-prune.timer
 
 
 class SystemdError(Exception):
@@ -72,16 +73,45 @@ def render_update_timer(*, schedule: str = "04:00") -> str:
     )
 
 
+def render_prune_service(*, dayzops_bin: str = "dayzops", user: str = "dayz") -> str:
+    """Conteúdo do dayz-prune.service — oneshot que roda 'dayzops prune'."""
+    return (
+        "[Unit]\n"
+        "Description=DayZ backup prune (dayzops)\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        f"User={user}\n"
+        f"ExecStart={dayzops_bin} prune\n"
+    )
+
+
+def render_prune_timer(*, schedule: str = "05:00") -> str:
+    """Conteúdo do dayz-prune.timer. `schedule` vira OnCalendar (ex: 05:00)."""
+    return (
+        "[Unit]\n"
+        "Description=DayZ backup prune timer (dayzops)\n"
+        "\n"
+        "[Timer]\n"
+        f"OnCalendar=*-*-* {schedule}:00\n"
+        "Persistent=true\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n"
+    )
+
+
 def generate_units(
     out_dir: Path,
     *,
     exec_start: str,
     working_dir: str,
     schedule: str = "04:00",
+    prune_schedule: str = "05:00",
     user: str = "dayz",
     dayzops_bin: str = "dayzops",
 ) -> dict:
-    """Gera as três units a partir do config (ADR-0001: single source of truth)."""
+    """Gera as units a partir do config (ADR-0001: single source of truth)."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -93,6 +123,10 @@ def generate_units(
             dayzops_bin=dayzops_bin, user=user
         ),
         f"{UPDATE_SERVICE}.timer": render_update_timer(schedule=schedule),
+        f"{PRUNE_SERVICE}.service": render_prune_service(
+            dayzops_bin=dayzops_bin, user=user
+        ),
+        f"{PRUNE_SERVICE}.timer": render_prune_timer(schedule=prune_schedule),
     }
 
     written = {}

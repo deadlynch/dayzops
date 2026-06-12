@@ -8,8 +8,11 @@ from dayzops.systemd import (
     render_server_unit,
     render_update_service,
     render_update_timer,
+    render_prune_service,
+    render_prune_timer,
     SERVER_SERVICE,
     UPDATE_SERVICE,
+    PRUNE_SERVICE,
 )
 
 log = get_logger("apply")
@@ -59,13 +62,17 @@ def build_exec_start(svc) -> str:
 
 def desired_units(svc) -> dict:
     """Conteúdo desejado de cada unit (nome -> texto)."""
-    schedule = svc.config.get("updates", {}).get("schedule", "04:00")
+    updates = svc.config.get("updates", {})
+    schedule = updates.get("schedule", "04:00")
+    prune_schedule = updates.get("prune_schedule", "05:00")
     return {
         f"{SERVER_SERVICE}.service": render_server_unit(
             exec_start=build_exec_start(svc), working_dir=str(svc.install_dir)
         ),
         f"{UPDATE_SERVICE}.service": render_update_service(),
         f"{UPDATE_SERVICE}.timer": render_update_timer(schedule=schedule),
+        f"{PRUNE_SERVICE}.service": render_prune_service(),
+        f"{PRUNE_SERVICE}.timer": render_prune_timer(schedule=prune_schedule),
     }
 
 

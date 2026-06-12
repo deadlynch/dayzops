@@ -29,18 +29,21 @@ def test_timer_maps_schedule_to_oncalendar():
     assert "OnCalendar=*-*-* 04:00:00" in timer
 
 
-def test_generate_units_writes_three_files(tmp_path):
+def test_generate_units_writes_all_files(tmp_path):
     written = generate_units(
         tmp_path,
         exec_start="/srv/dayz/server/DayZServer",
         working_dir="/srv/dayz/server",
         schedule="03:30",
+        prune_schedule="05:15",
     )
     assert set(written.keys()) == {
         "dayz.service", "dayz-update.service", "dayz-update.timer",
+        "dayz-prune.service", "dayz-prune.timer",
     }
     assert (tmp_path / "dayz.service").exists()
     assert "03:30:00" in (tmp_path / "dayz-update.timer").read_text()
+    assert "05:15:00" in (tmp_path / "dayz-prune.timer").read_text()
 
 
 def test_start_builds_correct_command():
