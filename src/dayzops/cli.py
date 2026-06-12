@@ -20,7 +20,8 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="caminho do server.yaml")
     sub = parser.add_subparsers(dest="command")
     for name in ("version", "validate-config", "status", "update",
-                 "backup", "rollback", "prune", "start", "stop", "restart"):
+                 "backup", "rollback", "prune", "start", "stop", "restart",
+                 "steam-login"):
         sub.add_parser(name)
 
     apply_p = sub.add_parser("apply")
@@ -183,6 +184,27 @@ def _cmd_apply(svc: app.Services, dry_run: bool) -> int:
     return 0
 
 
+def _cmd_steam_login(svc: app.Services) -> int:
+    """Login interativo: cacheia credencial do Steam (Guard) uma vez.
+
+    Roda steamcmd no contexto do usuário de serviço (com HOME ajustado),
+    com stdio herdado para o operador digitar o código do Guard quando
+    aplicável. Após sucesso, o ssfn fica em $HOME/.steam do dayz, e os
+    apply/update seguintes passam sem prompt.
+    """
+    print(
+        "Login interativo do Steam (digite Steam Guard se solicitado).\n"
+        f"Usuário: {svc.steam.username}\n"
+        f"Será executado como: {svc.service_user}\n"
+    )
+    code = svc.steam.interactive_login()
+    if code == 0:
+        print("\nLogin ok — credencial cacheada. Pode rodar 'dayzops apply'.")
+        return 0
+    print(f"\nLogin falhou (exit {code}). Confira usuário/senha e tente de novo.")
+    return code
+
+
 def main(argv=None) -> int:
     args = _build_parser().parse_args(argv)
     command = args.command
@@ -222,6 +244,8 @@ def main(argv=None) -> int:
         return _cmd_service_action(svc, command)
     if command == "apply":
         return _cmd_apply(svc, getattr(args, "dry_run", False))
+    if command == "steam-login":
+        return _cmd_steam_login(svc)
 
     print(f"Unknown command: {command}")
     return 1
