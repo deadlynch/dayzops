@@ -1,10 +1,10 @@
-# DayZCTL
+# DayZops
 
 Declarative DayZ Server Management for Linux
 
-DayZCTL is a Linux-native management platform for DayZ dedicated servers focused on reliability, reproducibility and operational simplicity.
+DayZops is a Linux-native management platform for DayZ dedicated servers focused on reliability, reproducibility and operational simplicity.
 
-Instead of maintaining multiple disconnected scripts for startup, updates, backups, mod management and key synchronization, DayZCTL provides a single control plane that manages the entire server lifecycle from a declarative configuration file.
+Instead of maintaining multiple disconnected scripts for startup, updates, backups, mod management and key synchronization, DayZops provides a single control plane that manages the entire server lifecycle from a declarative configuration file.
 
 ## Core Principles
 
