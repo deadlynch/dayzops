@@ -1,0 +1,62 @@
+name: CI
+
+# Roda em PRs e nos pushes para os branches principais (GitFlow).
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  # Suíte de testes num checkout LIMPO. É isto que pega arquivo novo que
+  # ficou de fora do commit: se faltar um módulo, o import quebra aqui —
+  # exatamente o caso do steamcmd.py que escapou na validação manual.
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Instalar pacote e dependências de teste
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest
+
+      - name: Rodar a suíte
+        run: python -m pytest -q
+
+  # Integridade do empacotamento: bit de execução e sintaxe dos scripts.
+  # É isto que pega o que o pytest não vê — bin/dayzops sem +x ou ausente.
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scripts precisam estar versionados e executáveis
+        run: |
+          for f in bin/dayzops scripts/install.sh; do
+            if [ ! -f "$f" ]; then
+              echo "::error::$f não está no repositório"
+              exit 1
+            fi
+            if [ ! -x "$f" ]; then
+              echo "::error::$f não tem bit de execução (use: git update-index --chmod=+x $f)"
+              exit 1
+            fi
+          done
+
+      - name: Sintaxe dos shell scripts
+        run: |
+          bash -n bin/dayzops
+          bash -n scripts/install.sh
+
+      - name: Shellcheck (bloqueia em warning ou acima)
+        run: shellcheck --severity=warning scripts/install.sh bin/dayzops
