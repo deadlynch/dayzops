@@ -18,6 +18,14 @@ class SteamCmdError(Exception):
 
 
 class SteamCmd:
+    """
+    Wrapper estável do SteamCMD.
+
+    REGRA PRINCIPAL:
+    - SteamCMD sempre recebe um único comando linear
+    - ordem dos parâmetros é responsabilidade do caller
+    """
+
     def __init__(
         self,
         username: str,
@@ -48,54 +56,38 @@ class SteamCmd:
         )
 
     # -------------------------
-    # login
+    # login (EXPLOÍCITO)
     # -------------------------
 
-    def _login_args(self) -> list[str]:
+    def login_args(self) -> list[str]:
         """
-        SteamCMD rules:
-        +login user password
-        OR
-        +login anonymous
+        Nunca injeta login automaticamente.
+        Caller decide se usa anonymous ou account real.
         """
         password = os.environ.get(STEAM_PASSWORD_ENV)
 
         if self.username and password:
             return ["+login", self.username, password]
 
-        # fallback seguro
         return ["+login", "anonymous"]
 
     # -------------------------
-    # command builder (FIX PRINCIPAL)
+    # execução
     # -------------------------
 
-    def build_command(self, steam_actions: list[str]) -> list[str]:
-        """
-        Ordem correta SEMPRE:
-        steamcmd +force_install_dir +login +app_update +quit
-        """
-        return [
-            self.steamcmd_path,
-            *steam_actions,
-            "+quit",
-        ]
-
-    def _redact(self, command: list[str]) -> list[str]:
-        password = os.environ.get(STEAM_PASSWORD_ENV)
-        if not password:
-            return command
-        return ["***" if part == password else part for part in command]
-
     def run(self, steam_actions: list[str]):
-        command = self.build_command(steam_actions)
+        """
+        Executa SteamCMD com comando já montado corretamente.
+        """
 
-        log.info("steamcmd: %s", " ".join(self._redact(command)))
+        command = [self.steamcmd_path, *steam_actions, "+quit"]
+
+        log.info("steamcmd: %s", " ".join(command))
 
         result = self._runner(command)
 
         if result.returncode != 0:
-            tail = (result.stdout or "")[-800:]
+            tail = (result.stdout or "")[-1000:]
             raise SteamCmdError(
                 f"steamcmd falhou (exit {result.returncode}).\n"
                 f"Saída final:\n{tail}"
@@ -104,17 +96,18 @@ class SteamCmd:
         return result
 
     # -------------------------
-    # high level ops
+    # operações
     # -------------------------
 
     def install_or_update_server(self, install_dir: Path):
         """
-        CORRETO:
-        force_install_dir SEMPRE antes do login
+        ORDEM CORRETA (OBRIGATÓRIA):
+        force_install_dir -> login -> app_update
         """
+
         return self.run([
             "+force_install_dir", str(install_dir),
-            *self._login_args(),
+            *self.login_args(),
             "+app_update", DAYZ_SERVER_APPID, "validate",
         ])
 
@@ -122,14 +115,13 @@ class SteamCmd:
         """
         Workshop usa appid do DayZ (221100)
         """
-        actions = [
+
+        cmd = [
+            *self.login_args(),
             "+workshop_download_item", DAYZ_APPID, str(workshop_id),
         ]
 
         if validate:
-            actions.append("validate")
+            cmd.append("validate")
 
-        return self.run([
-            *self._login_args(),
-            *actions,
-        ])
+        return self.run(cmd)
