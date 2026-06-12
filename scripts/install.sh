@@ -118,7 +118,25 @@ YAML
     chown "${DAYZ_USER}:${DAYZ_USER}" "${CONFIG}"
 }
 
-# 7) Agendamentos automáticos (habilita os timers)
+# 7) Arquivo de ambiente para a senha do Steam (referenciado pela unit de
+#    update via EnvironmentFile). Criado vazio e protegido; o admin preenche.
+create_env_file() {
+    if [[ -f /etc/dayzops.env ]]; then
+        log "/etc/dayzops.env já existe (mantido)"
+        return
+    fi
+    log "criando /etc/dayzops.env (preencha com a senha do Steam)"
+    install -m 600 -o "${DAYZ_USER}" -g "${DAYZ_USER}" /dev/null /etc/dayzops.env
+    cat > /etc/dayzops.env <<'ENV'
+# Senha do Steam usada pelo SteamCMD (lida pelo dayz-update.service).
+# NÃO versione este arquivo. Preencha a linha abaixo:
+# DAYZOPS_STEAM_PASSWORD=suasenha
+ENV
+    chmod 600 /etc/dayzops.env
+    chown "${DAYZ_USER}:${DAYZ_USER}" /etc/dayzops.env
+}
+
+# 8) Agendamentos automáticos (habilita os timers)
 enable_updates() {
     log "habilitando os timers de update e prune"
     systemctl enable --now dayz-update.timer dayz-prune.timer || \
@@ -133,8 +151,9 @@ main() {
     install_package
     generate_units
     create_config
+    create_env_file
     enable_updates
-    log "concluído. Edite ${CONFIG} (usuário Steam e mods) e rode: dayzops validate-config"
+    log "concluído. Edite ${CONFIG} (usuário Steam e mods) e /etc/dayzops.env (senha), depois rode: dayzops validate-config"
 }
 
 main "$@"
