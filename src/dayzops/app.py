@@ -97,3 +97,14 @@ def build_update_plan(svc: Services) -> UpdatePlan:
 
 def do_update(svc: Services, *, lock_file: Path = LOCK_FILE) -> dict:
     return run_update(build_update_plan(svc), store=svc.store, lock_file=lock_file)
+
+
+def units_dir_for(svc: Services) -> Path:
+    """Onde gravar as units systemd (config paths.systemd_dir ou padrão)."""
+    configured = _get(svc.config, "paths", "systemd_dir")
+    return Path(configured) if configured else Path("/etc/systemd/system")
+
+
+def do_apply(svc: Services, *, units_dir: Path, dry_run: bool = False, lock_file: Path = LOCK_FILE):
+    from dayzops import apply  # import tardio: evita ciclo apply<->app
+    return apply.run_apply(svc, units_dir=units_dir, dry_run=dry_run, lock_file=lock_file)

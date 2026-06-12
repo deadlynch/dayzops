@@ -27,6 +27,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "update", "backup", "start", "stop", "restart",
     ):
         sub.add_parser(name)
+    apply_p = sub.add_parser("apply")
+    apply_p.add_argument(
+        "--dry-run", action="store_true",
+        help="mostra o que mudaria sem alterar nada",
+    )
     return parser
 
 
@@ -118,6 +123,19 @@ def _cmd_service_action(svc: app.Services, action: str) -> int:
         return 1
 
 
+def _cmd_apply(svc: app.Services, dry_run: bool) -> int:
+    try:
+        plan = app.do_apply(svc, units_dir=app.units_dir_for(svc), dry_run=dry_run)
+    except LockError as exc:
+        print(f"Abortado: {exc}")
+        return 1
+
+    print(plan.render())
+    if dry_run and not plan.empty:
+        print("\n(dry-run: nada foi alterado)")
+    return 0
+
+
 def main(argv=None) -> int:
     args = _build_parser().parse_args(argv)
     command = args.command
@@ -149,6 +167,8 @@ def main(argv=None) -> int:
         return _cmd_backup(svc)
     if command in ("start", "stop", "restart"):
         return _cmd_service_action(svc, command)
+    if command == "apply":
+        return _cmd_apply(svc, getattr(args, "dry_run", False))
 
     print(f"Unknown command: {command}")
     return 1

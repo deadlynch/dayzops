@@ -17,9 +17,6 @@ class Mod:
     @classmethod
     def from_config(cls, entry: dict) -> "Mod":
         mod_id = entry["id"]
-        # O ADR-0007 só exige 'id'; o nome do symlink é opcional. Sem nome,
-        # cai num default determinístico '@<id>'. DayZ aceita qualquer nome
-        # de pasta desde que o -mod= use o mesmo.
         name = entry.get("name") or f"@{mod_id}"
         if not name.startswith("@"):
             name = f"@{name}"
@@ -48,10 +45,9 @@ def startup_params(mods: list[Mod], servermods: list[Mod]) -> list[str]:
 class ModSync:
     """Sincroniza symlinks @Nome -> workshop/<id> (ADR-0003).
 
-    Idempotente: rodar de novo com a mesma config não muda nada. Symlinks de
-    mods que saíram do config são removidos; os que apontam pro alvo errado
-    são corrigidos. Só mexe em symlinks '@...' que apontam pra dentro do
-    workshop — nunca toca em arquivos/pastas reais do servidor.
+    Separa planejar (plan) de executar (sync). O plan() inspeciona o disco e
+    diz o que mudaria, sem alterar nada — é o que torna o dry-run possível.
+    Idempotente: só mexe em symlinks '@...' que apontam pro workshop.
     """
 
     def __init__(self, workshop_dir: Path, server_dir: Path):
@@ -65,8 +61,6 @@ class ModSync:
         return self.workshop_dir / str(mod.id)
 
     def _is_managed_link(self, entry: Path) -> bool:
-        # Critério de segurança para remoção: é symlink, tem prefixo '@' e
-        # aponta pra dentro do workshop. Qualquer outra coisa é intocável.
         if not (entry.is_symlink() and entry.name.startswith("@")):
             return False
         try:
@@ -75,43 +69,59 @@ class ModSync:
             return False
         return str(Path(target)).startswith(str(self.workshop_dir))
 
-    def sync(self, mods: list[Mod]) -> dict:
-        """Converge os symlinks para exatamente o conjunto `mods`.
+    def plan(self, mods: list[Mod]) -> dict:
+        """Calcula, sem mutar nada, o que sync() faria.
 
-        Retorna um resumo das ações: created / updated / removed / unchanged.
+        Retorna {create, update, remove, unchanged} com nomes de symlink.
         """
-        self.server_dir.mkdir(parents=True, exist_ok=True)
         desired = {m.name for m in mods}
-        summary = {"created": [], "updated": [], "removed": [], "unchanged": []}
+        result = {"create": [], "update": [], "remove": [], "unchanged": []}
 
-        # 1) Cria ou corrige os desejados.
         for mod in mods:
             link = self._link_path(mod)
             target = self._target_path(mod)
-
             if link.is_symlink():
                 if os.readlink(link) == str(target):
-                    summary["unchanged"].append(mod.name)
+                    result["unchanged"].append(mod.name)
                 else:
-                    link.unlink()
-                    link.symlink_to(target)
-                    summary["updated"].append(mod.name)
+                    result["update"].append(mod.name)
             elif link.exists():
-                # Existe mas não é symlink (cópia real?) — não mexemos.
-                log.warning("%s existe e não é symlink; pulando", link)
+                log.warning("%s existe e não é symlink; ignorando", link)
             else:
-                link.symlink_to(target)
-                summary["created"].append(mod.name)
+                result["create"].append(mod.name)
 
-        # 2) Remove symlinks gerenciados que não estão mais no config.
-        for entry in self.server_dir.iterdir():
-            if entry.name not in desired and self._is_managed_link(entry):
-                entry.unlink()
-                summary["removed"].append(entry.name)
+        if self.server_dir.exists():
+            for entry in self.server_dir.iterdir():
+                if entry.name not in desired and self._is_managed_link(entry):
+                    result["remove"].append(entry.name)
+
+        return result
+
+    def sync(self, mods: list[Mod]) -> dict:
+        """Converge os symlinks para o conjunto `mods` (executa o plan)."""
+        self.server_dir.mkdir(parents=True, exist_ok=True)
+        actions = self.plan(mods)
+        by_name = {m.name: m for m in mods}
+
+        for name in actions["create"]:
+            mod = by_name[name]
+            self._link_path(mod).symlink_to(self._target_path(mod))
+        for name in actions["update"]:
+            mod = by_name[name]
+            link = self._link_path(mod)
+            link.unlink()
+            link.symlink_to(self._target_path(mod))
+        for name in actions["remove"]:
+            (self.server_dir / name).unlink()
 
         log.info(
             "mods sync: +%d ~%d -%d =%d",
-            len(summary["created"]), len(summary["updated"]),
-            len(summary["removed"]), len(summary["unchanged"]),
+            len(actions["create"]), len(actions["update"]),
+            len(actions["remove"]), len(actions["unchanged"]),
         )
-        return summary
+        return {
+            "created": actions["create"],
+            "updated": actions["update"],
+            "removed": actions["remove"],
+            "unchanged": actions["unchanged"],
+        }
