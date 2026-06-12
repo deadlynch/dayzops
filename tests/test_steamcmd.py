@@ -38,11 +38,29 @@ def test_password_comes_from_env_not_config(monkeypatch):
 
 def test_no_password_when_env_absent(monkeypatch):
     monkeypatch.delenv(STEAM_PASSWORD_ENV, raising=False)
+    monkeypatch.setattr(
+        SteamCmd,
+        "_read_password_file",
+        lambda self: None,
+    )
     sc = SteamCmd("alice")
     cmd = sc.build_command([])
     # Só "+login alice", sem terceiro elemento de senha.
     login_idx = cmd.index("+login")
     assert cmd[login_idx + 1] == "alice"
+
+
+def test_password_can_fallback_to_env_file(monkeypatch):
+    monkeypatch.delenv(STEAM_PASSWORD_ENV, raising=False)
+    monkeypatch.setattr(
+        SteamCmd,
+        "_read_password_file",
+        lambda self: "file-pass",
+    )
+    sc = SteamCmd("alice")
+    cmd = sc.build_command([])
+    assert "file-pass" in cmd
+    assert "file-pass" not in sc._redact(cmd)
 
 
 def test_nonzero_exit_raises(monkeypatch):
