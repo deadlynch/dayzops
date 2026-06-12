@@ -40,14 +40,26 @@ class SteamCmd:
         steamcmd_path: str = "steamcmd",
         timeout: int = 1800,
         runner=None,
+        run_as: str | None = None,
     ):
         self.username = username
         self.steamcmd_path = steamcmd_path
         self.timeout = timeout
+        # Usuário de serviço sob o qual o steamcmd deve rodar. Quando o DayZops
+        # está como root, baixar como root joga o conteúdo do Workshop em
+        # /root/.steam — ilegível pelo usuário de serviço. Rodando como esse
+        # usuário, o conteúdo cai no HOME dele (ex.: /srv/dayz/.steam).
+        self.run_as = run_as
         self._runner = runner or self._default_runner
 
     def is_available(self) -> bool:
         return shutil.which(self.steamcmd_path) is not None
+
+    def _wrap_as_user(self, command: list[str]) -> list[str]:
+        """Prefixa 'sudo -u <run_as>' quando estamos como root e há usuário."""
+        if self.run_as and hasattr(os, "geteuid") and os.geteuid() == 0:
+            return ["sudo", "-u", self.run_as, *command]
+        return command
 
     def _login_args(self) -> list[str]:
         password = os.environ.get(STEAM_PASSWORD_ENV)
@@ -58,7 +70,8 @@ class SteamCmd:
 
     def build_command(self, steam_actions: list[str]) -> list[str]:
         """Monta a linha de comando completa (lista de args, sem shell)."""
-        return [self.steamcmd_path, *self._login_args(), *steam_actions, "+quit"]
+        base = [self.steamcmd_path, *self._login_args(), *steam_actions, "+quit"]
+        return self._wrap_as_user(base)
 
     def _redact(self, command: list[str]) -> list[str]:
         password = os.environ.get(STEAM_PASSWORD_ENV)
