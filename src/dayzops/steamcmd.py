@@ -1,190 +1,116 @@
-"""Módulo de interação com o SteamCMD para download/atualização do servidor DayZ."""
-
 import os
+import shutil
 import subprocess
-import sys
-import logging
-from typing import Optional, Callable, List
 
-# Configuração básica de logging (caso não exista)
-log = logging.getLogger("dayzops.steamcmd")
+from pathlib import Path
 
-# ------------------------------------------------------------------------------
-# Exceções específicas do módulo
-# ------------------------------------------------------------------------------
+from dayzops.logger import get_logger
+
+log = get_logger("steamcmd")
+
+# App IDs (Valve / SteamDB).
+DAYZ_SERVER_APPID = "223350"  # DayZ Dedicated Server (Linux)
+DAYZ_APPID = "221100"         # DayZ (usado para baixar mods do Workshop)
+
+# A senha do Steam é lida SÓ desta env var — nunca do server.yaml.
+# Manter segredo fora do arquivo de config declarativo é regra: o YAML é
+# versionável/compartilhável, a senha não.
+STEAM_PASSWORD_ENV = "DAYZOPS_STEAM_PASSWORD"
+
 
 class SteamCmdError(Exception):
-    """Erro genérico na execução do steamcmd."""
     pass
 
-
-class SteamCmd2FARequiredError(SteamCmdError):
-    """Lançada quando o Steam Guard (2FA) é exigido e não foi fornecido."""
-    pass
-
-
-# ------------------------------------------------------------------------------
-# Classe principal
-# ------------------------------------------------------------------------------
 
 class SteamCmd:
-    """Interface para executar comandos do SteamCMD."""
+    """Invólucro fino sobre o binário steamcmd.
+
+    A lógica de montar o comando (pura, testável) fica separada da execução
+    do subprocesso (efeito colateral), o que deixa o módulo testável sem ter
+    o steamcmd instalado: nos testes injeta-se um `runner` falso.
+    """
 
     def __init__(
         self,
         username: str,
-        password: Optional[str] = None,
-        runner: Optional[Callable[[List[str]], subprocess.CompletedProcess]] = None,
+        *,
+        steamcmd_path: str = "steamcmd",
+        timeout: int = 1800,
+        runner=None,
     ):
-        """
-        Inicializa a instância do SteamCMD.
-
-        Args:
-            username: Nome de usuário Steam.
-            password: Senha da Steam (opcional, pode ser fornecida via env).
-            runner: Função que executa o comando (para testes).
-        """
         self.username = username
-        # Prioriza a senha passada diretamente, senão tenta da variável de ambiente
-        self.password = password or os.environ.get("DAYZOPS_STEAM_PASSWORD", "")
+        self.steamcmd_path = steamcmd_path
+        self.timeout = timeout
+        # Injeção de dependência: o teste passa um runner falso.
         self._runner = runner or self._default_runner
 
-    def _redact(self, command: List[str]) -> List[str]:
-        """Remove a senha da linha de comando para logs seguros."""
-        redacted = []
-        skip_next = False
-        for token in command:
-            if skip_next:
-                redacted.append("********")
-                skip_next = False
-                continue
-            if token == "+password":
-                skip_next = True
-            redacted.append(token)
-        return redacted
+    def is_available(self) -> bool:
+        """True se o binário steamcmd está no PATH (ou no caminho dado)."""
+        return shutil.which(self.steamcmd_path) is not None
 
-    def build_command(self, steam_actions: List[str]) -> List[str]:
-        """Constrói a lista de argumentos para o steamcmd."""
-        cmd = ["steamcmd"]
-        if self.username:
-            cmd.extend(["+login", self.username])
-            if self.password:
-                cmd.extend(["+password", self.password])
-        cmd.extend(steam_actions)
-        cmd.append("+quit")
-        return cmd
+    def _login_args(self) -> list[str]:
+        password = os.environ.get(STEAM_PASSWORD_ENV)
+        args = ["+login", self.username]
+        if password:
+            # Sem senha, o steamcmd usa credencial em cache ou pede interativo.
+            args.append(password)
+        return args
 
-    # --------------------------------------------------------------------------
-    # Runner interativo com suporte a 2FA
-    # --------------------------------------------------------------------------
+    def build_command(self, steam_actions: list[str]) -> list[str]:
+        """Monta a linha de comando completa (lista de args, sem shell)."""
+        return [
+            self.steamcmd_path,
+            *self._login_args(),
+            *steam_actions,
+            "+quit",
+        ]
 
-    def _default_runner(self, command: List[str]) -> subprocess.CompletedProcess:
-        """
-        Executa o steamcmd de forma interativa, suportando Steam Guard (2FA).
+    def _redact(self, command: list[str]) -> list[str]:
+        """Versão do comando segura para log: troca a senha por ***."""
+        password = os.environ.get(STEAM_PASSWORD_ENV)
+        if not password:
+            return command
+        return ["***" if part == password else part for part in command]
 
-        Lê a saída linha a linha, detecta a solicitação do código 2FA e
-        injeta o código automaticamente (via variável de ambiente ou input).
-        """
-        process = subprocess.Popen(
+    def _default_runner(self, command: list[str]):
+        # Lista de args (sem shell=True) evita injeção de shell.
+        return subprocess.run(
             command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,   # redireciona stderr para stdout para capturar mensagens 2FA
+            capture_output=True,
             text=True,
-            bufsize=1,                   # line-buffered
+            timeout=self.timeout,
+            check=False,
         )
 
-        stdout_lines = []
-        two_factor_detected = False
-
-        while True:
-            if process.stdout is None:
-                break
-            line = process.stdout.readline()
-            if not line and process.poll() is not None:
-                break
-            if not line:
-                continue
-
-            stdout_lines.append(line)
-
-            # Detecta a solicitação do código 2FA (Steam Guard)
-            if not two_factor_detected and (
-                "Steam Guard" in line or "Two-factor" in line or "Please check your email" in line
-            ):
-                two_factor_detected = True
-                two_factor_code = os.environ.get("DAYZOPS_STEAM_2FA_CODE")
-
-                if not two_factor_code:
-                    # Se não houver variável de ambiente, tenta ler interativamente
-                    if not sys.stdin.isatty():
-                        raise SteamCmd2FARequiredError(
-                            "Código 2FA necessário, mas não há terminal interativo. "
-                            "Defina a variável de ambiente DAYZOPS_STEAM_2FA_CODE."
-                        )
-                    two_factor_code = input(f"[dayzops] Código 2FA para conta {self.username}: ").strip()
-
-                # Envia o código para o processo steamcmd
-                if process.stdin:
-                    process.stdin.write(two_factor_code + "\n")
-                    process.stdin.flush()
-                    log.debug("Código 2FA enviado para o steamcmd.")
-
-        process.wait()
-        return subprocess.CompletedProcess(
-            args=command,
-            returncode=process.returncode,
-            stdout=''.join(stdout_lines),
-            stderr=''
-        )
-
-    # --------------------------------------------------------------------------
-    # Execução principal
-    # --------------------------------------------------------------------------
-
-    def run(self, steam_actions: List[str]) -> subprocess.CompletedProcess:
-        """
-        Executa uma lista de ações no steamcmd.
-
-        Args:
-            steam_actions: Lista de argumentos do steamcmd (ex: ["+app_update", "223350"])
-
-        Returns:
-            subprocess.CompletedProcess com o resultado da execução.
-
-        Raises:
-            SteamCmdError: Se o steamcmd retornar código de saída diferente de zero.
-            SteamCmd2FARequiredError: Se o 2FA for necessário e não puder ser fornecido.
-        """
+    def run(self, steam_actions: list[str]):
         command = self.build_command(steam_actions)
+        # Loga a versão redigida — a senha NUNCA vai pro log.
         log.info("steamcmd: %s", " ".join(self._redact(command)))
 
         result = self._runner(command)
 
         if result.returncode != 0:
-            tail = (result.stdout or "")[-500:]
+            tail = (getattr(result, "stdout", "") or "")[-500:]
             raise SteamCmdError(
                 f"steamcmd falhou (exit {result.returncode}).\n"
                 f"Saída final:\n{tail}"
             )
         return result
 
-    # --------------------------------------------------------------------------
-    # Ações comuns do SteamCMD
-    # --------------------------------------------------------------------------
+    # --- Operações de alto nível ---
 
-    def install_or_update_server(self, install_dir: str) -> subprocess.CompletedProcess:
-        """Instala ou atualiza o servidor DayZ no diretório especificado."""
-        actions = [
-            f"+force_install_dir {install_dir}",
-            "+app_update 223350 validate",
-        ]
-        return self.run(actions)
+    def install_or_update_server(self, install_dir: Path):
+        """Instala OU atualiza o servidor (no steamcmd é o mesmo comando)."""
+        return self.run(
+            [
+                "+force_install_dir", str(install_dir),
+                "+app_update", DAYZ_SERVER_APPID, "validate",
+            ]
+        )
 
-    def validate(self, install_dir: str) -> subprocess.CompletedProcess:
-        """Valida os arquivos do servidor DayZ."""
-        actions = [
-            f"+force_install_dir {install_dir}",
-            "+app_update 223350 validate",
-        ]
-        return self.run(actions)
+    def download_mod(self, workshop_id, *, validate: bool = True):
+        """Baixa/atualiza um mod do Workshop (sob o appid do jogo)."""
+        action = ["+workshop_download_item", DAYZ_APPID, str(workshop_id)]
+        if validate:
+            action.append("validate")
+        return self.run(action)
