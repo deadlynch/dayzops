@@ -103,7 +103,7 @@ def test_runs_as_service_user_when_root(monkeypatch):
     monkeypatch.setattr("dayzops.steamcmd.os.geteuid", lambda: 0)  # finge root
     sc = SteamCmd("alice", run_as="dayz")
     cmd = sc.build_command(["+app_update", "223350"])
-    assert cmd[:3] == ["sudo", "-u", "dayz"]
+    assert cmd[:4] == ["sudo", "-H", "-u", "dayz"]  # -H herda HOME do dayz
     assert "steamcmd" in cmd  # o binário vem depois do prefixo
 
 
