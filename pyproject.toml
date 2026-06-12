@@ -5,10 +5,23 @@ description = "Declarative DayZ server operations platform"
 readme = "README.md"
 requires-python = ">=3.11"
 
+authors = [
+    { name = "Edson Batista" }
+]
+
 dependencies = [
     "PyYAML>=6.0"
 ]
 
+[project.scripts]
+dayzops = "dayzops.cli:main"
+
 [build-system]
 requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
