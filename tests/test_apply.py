@@ -7,13 +7,15 @@ def _result(returncode=0, stdout="Success"):
     return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr="")
 
 
-def _svc(tmp_path, *, server_installed=True):
+def _svc(tmp_path, *, server_installed=True, mod_content=True, steam_runner=None):
     server = tmp_path / "server"
     workshop = tmp_path / "workshop"
     server.mkdir(parents=True)
     if server_installed:
         (server / "DayZServer").write_text("binario")
-    (workshop / "1559212036").mkdir(parents=True)
+    workshop.mkdir(parents=True, exist_ok=True)
+    if mod_content:
+        (workshop / "1559212036").mkdir()
     cfg = {
         "server": {"name": "T", "map": "chernarus", "port": 2302},
         "steam": {"username": "alice"},
@@ -27,7 +29,7 @@ def _svc(tmp_path, *, server_installed=True):
         "mods": [{"id": 1559212036, "name": "CF"}],
         "servermods": [],
     }
-    return app.build_services(cfg, steam_runner=lambda c: _result(),
+    return app.build_services(cfg, steam_runner=steam_runner or (lambda c: _result()),
                               control_runner=lambda c: _result())
 
 
@@ -65,6 +67,27 @@ def test_apply_converges(tmp_path):
     assert (tmp_path / "server" / "@CF").is_symlink()
     assert (units / "dayz.service").exists()
     assert svc.store.installed_mods() == [{"id": 1559212036, "name": "@CF"}]
+
+
+def test_plan_flags_missing_mod_content(tmp_path):
+    svc = _svc(tmp_path, mod_content=False)
+    plan = apply.build_plan(svc, units_dir=tmp_path / "units")
+    assert ("mod", "download") in {(c.resource, c.action) for c in plan.changes}
+
+
+def test_apply_downloads_missing_mod_content(tmp_path):
+    calls = []
+    svc = _svc(tmp_path, mod_content=False,
+               steam_runner=lambda c: (calls.append(c), _result())[1])
+    apply.run_apply(svc, units_dir=tmp_path / "units",
+                    lock_file=tmp_path / "dayzops.lock")
+    assert any("+workshop_download_item" in c for c in calls)
+
+
+def test_plan_no_download_when_content_present(tmp_path):
+    svc = _svc(tmp_path, mod_content=True)
+    plan = apply.build_plan(svc, units_dir=tmp_path / "units")
+    assert ("mod", "download") not in {(c.resource, c.action) for c in plan.changes}
 
 
 def test_apply_is_idempotent(tmp_path):
