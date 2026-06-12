@@ -43,6 +43,7 @@ class Services:
     workshop_dir: Path
     mods: list
     servermods: list
+    service_user: str = "dayz"
 
     @property
     def all_mods(self) -> list:
@@ -60,13 +61,14 @@ def build_services(config: dict, *, steam_runner=None, control_runner=None) -> S
     backups_dir = Path(_get(config, "paths", "backups_dir"))
     state_dir = Path(_get(config, "paths", "state_dir"))
     username = _get(config, "steam", "username")
+    service_user = _get(config, "service", "user", default="dayz")
 
     store = StateStore(state_dir)
 
     return Services(
         config=config,
         store=store,
-        steam=SteamCmd(username, runner=steam_runner),
+        steam=SteamCmd(username, runner=steam_runner, run_as=service_user),
         backup=BackupManager(install_dir, backups_dir, store=store),
         modsync=ModSync(workshop_dir, install_dir),
         keys=KeyManager(install_dir),
@@ -75,6 +77,7 @@ def build_services(config: dict, *, steam_runner=None, control_runner=None) -> S
         workshop_dir=workshop_dir,
         mods=parse_mods(_get(config, "mods", default=[])),
         servermods=parse_mods(_get(config, "servermods", default=[])),
+        service_user=service_user,
     )
 
 
