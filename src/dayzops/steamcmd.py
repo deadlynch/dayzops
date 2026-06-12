@@ -3,9 +3,11 @@
 import os
 import subprocess
 import sys
+import logging
 from typing import Optional, Callable, List
 
-from dayzops.log import log
+# Configuração básica de logging (caso não exista)
+log = logging.getLogger("dayzops.steamcmd")
 
 # ------------------------------------------------------------------------------
 # Exceções específicas do módulo
