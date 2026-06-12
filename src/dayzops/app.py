@@ -80,7 +80,7 @@ def build_services(config: dict, *, steam_runner=None, control_runner=None) -> S
 
 def _sync_mods(svc: Services) -> dict:
     for mod in svc.all_mods:
-        svc.steam.download_mod(mod.id)
+        svc.steam.download_mod(mod.id, workshop_dir=svc.workshop_dir)
     summary = svc.modsync.sync(svc.all_mods)
     svc.store.set_installed_mods([{"id": m.id, "name": m.name} for m in svc.all_mods])
     return summary
