@@ -103,8 +103,11 @@ def test_runs_as_service_user_when_root(monkeypatch):
     monkeypatch.setattr("dayzops.steamcmd.os.geteuid", lambda: 0)  # finge root
     sc = SteamCmd("alice", run_as="dayz")
     cmd = sc.build_command(["+app_update", "223350"])
-    assert cmd[:4] == ["sudo", "-H", "-u", "dayz"]  # -H herda HOME do dayz
-    assert "steamcmd" in cmd  # o binário vem depois do prefixo
+    # sudo -H --preserve-env=DAYZOPS_STEAM_PASSWORD -u dayz steamcmd ...
+    assert cmd[0] == "sudo"
+    assert "-H" in cmd[:5]
+    assert "-u" in cmd and cmd[cmd.index("-u") + 1] == "dayz"
+    assert "steamcmd" in cmd
 
 
 def test_no_sudo_wrap_when_not_root(monkeypatch):
@@ -122,3 +125,71 @@ def test_no_sudo_wrap_without_run_as(monkeypatch):
     sc = SteamCmd("alice")  # sem run_as
     cmd = sc.build_command([])
     assert "sudo" not in cmd
+
+
+def test_reads_password_from_env_file(monkeypatch, tmp_path):
+    monkeypatch.delenv(STEAM_PASSWORD_ENV, raising=False)
+    env = tmp_path / "dayzops.env"
+    env.write_text("# comentário\nDAYZOPS_STEAM_PASSWORD=fromfile\n")
+    monkeypatch.setattr("dayzops.steamcmd.ENV_FILE_PATH", str(env))
+
+    sc = SteamCmd("alice")
+    cmd = sc.build_command([])
+    assert "fromfile" in cmd
+    # E o redact some com ela.
+    assert "fromfile" not in sc._redact(cmd)
+
+
+def test_env_var_wins_over_env_file(monkeypatch, tmp_path):
+    env = tmp_path / "dayzops.env"
+    env.write_text("DAYZOPS_STEAM_PASSWORD=fromfile\n")
+    monkeypatch.setattr("dayzops.steamcmd.ENV_FILE_PATH", str(env))
+    monkeypatch.setenv(STEAM_PASSWORD_ENV, "fromenv")
+
+    sc = SteamCmd("alice")
+    cmd = sc.build_command([])
+    assert "fromenv" in cmd
+    assert "fromfile" not in cmd
+
+
+def test_sudo_wrap_preserves_password_env(monkeypatch):
+    monkeypatch.delenv(STEAM_PASSWORD_ENV, raising=False)
+    monkeypatch.setattr("dayzops.steamcmd.os.geteuid", lambda: 0)
+    sc = SteamCmd("alice", run_as="dayz")
+    cmd = sc.build_command([])
+    # Sem o --preserve-env, sudo filtra DAYZOPS_STEAM_PASSWORD ao trocar de
+    # usuário e o steamcmd cai em prompt -> Invalid Password.
+    assert f"--preserve-env={STEAM_PASSWORD_ENV}" in cmd
+
+
+def test_invalid_password_without_credential_raises_actionable(monkeypatch):
+    from dayzops.steamcmd import SteamAuthError
+    monkeypatch.delenv(STEAM_PASSWORD_ENV, raising=False)
+    monkeypatch.setattr("dayzops.steamcmd.ENV_FILE_PATH", "/no/such/file")
+
+    def runner(cmd):
+        return _fake_result(5, "Logging in user 'alice'...ERROR (Invalid Password)")
+
+    sc = SteamCmd("alice", runner=runner)
+    try:
+        sc.run([])
+    except SteamAuthError as exc:
+        assert "senha não configurada" in str(exc)
+        return
+    raise AssertionError("deveria ter levantado SteamAuthError")
+
+
+def test_invalid_password_with_credential_suggests_steam_login(monkeypatch):
+    from dayzops.steamcmd import SteamAuthError
+    monkeypatch.setenv(STEAM_PASSWORD_ENV, "secret")
+
+    def runner(cmd):
+        return _fake_result(5, "Logging in user 'alice'...ERROR (Invalid Password)")
+
+    sc = SteamCmd("alice", runner=runner)
+    try:
+        sc.run([])
+    except SteamAuthError as exc:
+        assert "steam-login" in str(exc)
+        return
+    raise AssertionError("deveria ter levantado SteamAuthError")
