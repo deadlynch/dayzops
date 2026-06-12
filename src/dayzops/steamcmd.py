@@ -16,7 +16,6 @@ DAYZ_APPID = "221100"         # DayZ (usado para baixar mods do Workshop)
 # Manter segredo fora do arquivo de config declarativo é regra: o YAML é
 # versionável/compartilhável, a senha não.
 STEAM_PASSWORD_ENV = "DAYZOPS_STEAM_PASSWORD"
-STEAM_PASSWORD_FILE = Path("/etc/dayzops.env")
 
 
 class SteamCmdError(Exception):
@@ -49,39 +48,8 @@ class SteamCmd:
         """True se o binário steamcmd está no PATH (ou no caminho dado)."""
         return shutil.which(self.steamcmd_path) is not None
 
-    def _password(self) -> str | None:
-        password = os.environ.get(STEAM_PASSWORD_ENV)
-        if password:
-            return password
-        return self._read_password_file()
-
-    def _read_password_file(self) -> str | None:
-        try:
-            text = STEAM_PASSWORD_FILE.read_text(encoding="utf-8")
-        except OSError:
-            return None
-
-        for line in text.splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            if key.strip() != STEAM_PASSWORD_ENV:
-                continue
-            value = value.strip()
-            if (
-                len(value) >= 2
-                and value[0] == value[-1]
-                and value[0] in ("'", '"')
-            ):
-                value = value[1:-1]
-            return value
-        return None
-
     def _login_args(self) -> list[str]:
-        password = self._password()
+        password = os.environ.get(STEAM_PASSWORD_ENV)
         args = ["+login", self.username]
         if password:
             # Sem senha, o steamcmd usa credencial em cache ou pede interativo.
@@ -99,7 +67,7 @@ class SteamCmd:
 
     def _redact(self, command: list[str]) -> list[str]:
         """Versão do comando segura para log: troca a senha por ***."""
-        password = self._password()
+        password = os.environ.get(STEAM_PASSWORD_ENV)
         if not password:
             return command
         return ["***" if part == password else part for part in command]
