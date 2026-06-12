@@ -49,7 +49,7 @@ All server configuration shall be defined in a single declarative configuration 
 
 This file becomes the authoritative source of truth for the entire platform.
 
-All DayZCTL components must derive their behavior from this configuration.
+All dayzops components must derive their behavior from this configuration.
 
 Examples include:
 
@@ -144,7 +144,7 @@ The following components must consume configuration exclusively from:
 
 Components:
 
-- dayzctl
+- dayzops
 - dayz.service
 - dayz-update.service
 - backup engine

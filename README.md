@@ -43,7 +43,7 @@ Startup, updates, backups, mod synchronization and runtime configuration are gen
 server.yaml
       │
       ▼
-   dayzctl
+   dayzops
       │
  ┌────┼────┐
  ▼    ▼    ▼
@@ -62,7 +62,7 @@ mods keys backups
 /srv/dayz
 ├── backups/
 ├── bin/
-│   └── dayzctl
+│   └── dayzops
 ├── config/
 │   └── server.yaml
 ├── custom/
@@ -101,23 +101,23 @@ managed_dirs: []
 ## Commands
 
 ```bash
-dayzctl start
-dayzctl stop
-dayzctl restart
-dayzctl update
-dayzctl backup
-dayzctl rollback
-dayzctl validate
-dayzctl status
+dayzops start
+dayzops stop
+dayzops restart
+dayzops update
+dayzops backup
+dayzops rollback
+dayzops validate
+dayzops status
 ```
 
 ### Mod Management
 
 ```bash
-dayzctl mod add <workshop-id>
-dayzctl mod remove <workshop-id>
-dayzctl mod list
-dayzctl mod sync
+dayzops mod add <workshop-id>
+dayzops mod remove <workshop-id>
+dayzops mod list
+dayzops mod sync
 ```
 
 ## License

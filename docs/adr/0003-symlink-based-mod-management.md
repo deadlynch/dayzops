@@ -25,7 +25,7 @@ Problems:
 
 ## Decision
 
-DayZCTL shall use symbolic links for mod deployment.
+dayzops shall use symbolic links for mod deployment.
 
 Workshop content remains in:
 

@@ -32,7 +32,7 @@ The project requires:
 
 ## Decision
 
-DayZCTL shall use systemd timers instead of cron.
+dayzops shall use systemd timers instead of cron.
 
 Scheduled operations will be executed through:
 

@@ -33,7 +33,7 @@ Incremental synchronization can leave:
 
 ## Decision
 
-DayZCTL shall rebuild the complete key directory during synchronization.
+dayzops shall rebuild the complete key directory during synchronization.
 
 Process:
 

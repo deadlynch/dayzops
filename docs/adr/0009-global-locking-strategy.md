@@ -36,12 +36,12 @@ Backup captures incomplete state
 
 ## Decision
 
-DayZCTL shall implement a global lock mechanism.
+dayzops shall implement a global lock mechanism.
 
 Lock file:
 
 ```text
-/run/dayzctl.lock
+/run/dayzops.lock
 ```
 
 Operations requiring exclusive access:

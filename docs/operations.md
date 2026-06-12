@@ -5,7 +5,7 @@
 ### Server Status
 
 ```bash
-dayzctl status
+dayzops status
 ```
 
 ```bash
@@ -41,31 +41,31 @@ dayzops restart
 ### Add Mod
 
 ```bash
-dayzctl mod add <workshop-id>
+dayzops mod add <workshop-id>
 ```
 
 Example:
 
 ```bash
-dayzctl mod add 1559212036
+dayzops mod add 1559212036
 ```
 
 ### Remove Mod
 
 ```bash
-dayzctl mod remove <workshop-id>
+dayzops mod remove <workshop-id>
 ```
 
 ### List Mods
 
 ```bash
-dayzctl mod list
+dayzops mod list
 ```
 
 ### Synchronize Mods
 
 ```bash
-dayzctl mod sync
+dayzops mod sync
 ```
 
 This operation:
@@ -81,7 +81,7 @@ This operation:
 ## Key Synchronization
 
 ```bash
-dayzctl sync-keys
+dayzops sync-keys
 ```
 
 The operation:
@@ -97,7 +97,7 @@ The operation:
 ## Updates
 
 ```bash
-dayzctl update
+dayzops update
 ```
 
 Workflow:
@@ -125,19 +125,19 @@ start
 Create backup:
 
 ```bash
-dayzctl backup
+dayzops backup
 ```
 
 List backups:
 
 ```bash
-dayzctl backup list
+dayzops backup list
 ```
 
 Restore backup:
 
 ```bash
-dayzctl rollback <backup-name>
+dayzops rollback <backup-name>
 ```
 
 ---
@@ -147,13 +147,13 @@ dayzctl rollback <backup-name>
 Validate configuration:
 
 ```bash
-dayzctl validate-config
+dayzops validate-config
 ```
 
 Validate installation:
 
 ```bash
-dayzctl validate
+dayzops validate
 ```
 
 ---
@@ -161,7 +161,7 @@ dayzctl validate
 ## Health Checks
 
 ```bash
-dayzctl healthcheck
+dayzops healthcheck
 ```
 
 Validation includes:
@@ -202,7 +202,7 @@ journalctl -u dayz -f
 ### Server Does Not Start
 
 ```bash
-dayzctl validate
+dayzops validate
 ```
 
 ```bash
@@ -212,17 +212,17 @@ journalctl -u dayz -n 100
 ### Signature Errors
 
 ```bash
-dayzctl sync-keys
+dayzops sync-keys
 ```
 
 ### Mod Not Loading
 
 ```bash
-dayzctl mod list
+dayzops mod list
 ```
 
 ```bash
-dayzctl mod sync
+dayzops mod sync
 ```
 
 ### Update Failure
@@ -232,5 +232,5 @@ journalctl -u dayz-update
 ```
 
 ```bash
-dayzctl status
+dayzops status
 ```

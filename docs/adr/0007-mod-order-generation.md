@@ -45,7 +45,7 @@ mods:
 
 Generated startup parameters shall preserve the exact order.
 
-DayZCTL shall not attempt automatic dependency resolution.
+dayzops shall not attempt automatic dependency resolution.
 
 Responsibility for ordering remains with the administrator.
 

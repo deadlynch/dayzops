@@ -119,7 +119,7 @@ logs:
 Verify configuration:
 
 ```bash
-dayzctl validate-config
+dayzops validate-config
 ```
 
 Verify service:
@@ -131,7 +131,7 @@ systemctl status dayz
 Verify server state:
 
 ```bash
-dayzctl status
+dayzops status
 ```
 
 ---
@@ -147,7 +147,7 @@ sudo systemctl start dayz
 Or:
 
 ```bash
-dayzctl start
+dayzops start
 ```
 
 Verify logs:

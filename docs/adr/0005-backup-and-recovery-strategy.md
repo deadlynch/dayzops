@@ -26,7 +26,7 @@ The platform requires reliable disaster recovery.
 
 ## Decision
 
-DayZCTL shall provide automated backup and rollback functionality.
+dayzops shall provide automated backup and rollback functionality.
 
 Default backup scope:
 

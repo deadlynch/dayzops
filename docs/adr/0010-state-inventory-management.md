@@ -27,7 +27,7 @@ Relying solely on filesystem inspection is inefficient.
 
 ## Decision
 
-DayZCTL shall maintain generated state inventories.
+dayzops shall maintain generated state inventories.
 
 Location:
 
