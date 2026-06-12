@@ -79,3 +79,15 @@ def _safe_get(config: dict, path: str):
         return require(config, path)
     except ValidationError:
         return None
+
+
+def save_config(config: dict, path) -> None:
+    """Grava o config de volta no YAML.
+
+    ATENÇÃO: yaml.safe_dump não preserva comentários nem o estilo original do
+    arquivo — ele reserializa a estrutura. Para um config gerado/gerenciado
+    isso é aceitável, mas se o usuário mantém comentários no server.yaml, eles
+    se perdem. Preservar exigiria uma lib com round-trip (ex.: ruamel.yaml).
+    """
+    with open(path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(config, fh, sort_keys=False, allow_unicode=True)

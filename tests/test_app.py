@@ -3,7 +3,7 @@ import types
 from dayzops import app
 
 
-def _result(returncode=0, stdout="Success"):
+def _result(returncode=0, stdout="active"):
     return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr="")
 
 
@@ -11,6 +11,7 @@ def _config(tmp_path):
     server = tmp_path / "server"
     workshop = tmp_path / "workshop"
     (server / "profiles").mkdir(parents=True)
+    (server / "DayZServer").write_text("binario")
     (server / "serverDZ.cfg").write_text("hostname = Test;")
     (workshop / "1559212036").mkdir(parents=True)
     return {

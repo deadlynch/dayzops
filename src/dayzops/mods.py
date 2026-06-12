@@ -125,3 +125,28 @@ class ModSync:
             "removed": actions["remove"],
             "unchanged": actions["unchanged"],
         }
+
+
+def add_mod(config: dict, mod_id: int, *, name: str | None = None, server: bool = False) -> bool:
+    """Adiciona um mod à lista (mods ou servermods). False se já existir."""
+    key = "servermods" if server else "mods"
+    entries = config.setdefault(key, [])
+    if any(e.get("id") == mod_id for e in entries):
+        return False
+    entry = {"id": mod_id}
+    if name:
+        entry["name"] = name
+    entries.append(entry)
+    return True
+
+
+def remove_mod(config: dict, mod_id: int) -> bool:
+    """Remove um mod de ambas as listas. False se não encontrado."""
+    removed = False
+    for key in ("mods", "servermods"):
+        entries = config.get(key, [])
+        kept = [e for e in entries if e.get("id") != mod_id]
+        if len(kept) != len(entries):
+            config[key] = kept
+            removed = True
+    return removed

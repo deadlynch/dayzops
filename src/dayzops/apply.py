@@ -125,6 +125,7 @@ def run_apply(svc, *, units_dir: Path, dry_run: bool = False, lock_file=None) ->
             svc.steam.install_or_update_server(svc.install_dir)
 
         svc.modsync.sync(svc.all_mods)
+        svc.keys.rebuild(svc.mod_dirs)  # keys seguem os mods (ADR-0004)
 
         units_dir.mkdir(parents=True, exist_ok=True)
         for name, content in desired_units(svc).items():
