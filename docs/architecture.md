@@ -2,7 +2,7 @@
 
 ## Overview
 
-DayZCTL is a declarative management platform for Linux-hosted DayZ servers.
+DayZops is a declarative management platform for Linux-hosted DayZ servers.
 
 The project centralizes server lifecycle management into a single control plane, eliminating the need for multiple disconnected scripts.
 
@@ -37,7 +37,7 @@ No other component should maintain independent state.
 
 Administrators declare desired state.
 
-DayZCTL is responsible for reconciling the actual state.
+DayZops is responsible for reconciling the actual state.
 
 ### Idempotent Operations
 
@@ -60,7 +60,7 @@ The platform is designed specifically for Linux environments using:
 server.yaml
       │
       ▼
-   dayzctl
+   DayZops
       │
  ┌────┼────┐
  ▼    ▼    ▼
@@ -81,7 +81,7 @@ mods keys backups
 /srv/dayz
 ├── backups/
 ├── bin/
-│   └── dayzctl
+│   └── DayZops
 ├── config/
 │   └── server.yaml
 ├── custom/
@@ -246,7 +246,7 @@ The synchronization process is responsible for:
 
 ## Key Management
 
-DayZCTL never assumes a fixed key directory structure.
+DayZops never assumes a fixed key directory structure.
 
 The platform performs recursive discovery:
 
@@ -294,7 +294,7 @@ which contains world persistence.
 
 ## Managed Resources
 
-DayZCTL supports declarative file deployment.
+DayZops supports declarative file deployment.
 
 Example:
 
@@ -342,7 +342,7 @@ They must not be edited manually.
 To prevent concurrent operations:
 
 ```text
-/run/dayzctl.lock
+/run/DayZops.lock
 ```
 
 is created during critical workflows.
