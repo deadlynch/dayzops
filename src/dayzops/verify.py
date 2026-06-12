@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from dayzops.logger import get_logger
@@ -9,6 +10,16 @@ SERVER_BINARY = "DayZServer"
 
 class VerifyError(Exception):
     """Levantada quando a instalação não está pronta para subir."""
+
+
+def _service_root(svc) -> Path:
+    """Raiz da árvore gerenciada (ancestral comum de install e workshop).
+
+    Conteúdo de mod deve resolver para dentro dela. Se resolver para fora
+    (ex.: /root/.steam, de um download feito como root), o servidor — que
+    roda como o usuário de serviço — não consegue ler.
+    """
+    return Path(os.path.commonpath([str(svc.install_dir), str(svc.workshop_dir)]))
 
 
 def check_install(svc) -> list[str]:
@@ -28,10 +39,25 @@ def check_install(svc) -> list[str]:
     if not (install_dir / server_cfg).exists():
         problems.append(f"config do servidor ausente: {server_cfg}")
 
-    # 3) Cada mod ativo tem conteúdo baixado no workshop.
+    # 3) Cada mod ativo tem conteúdo baixado E acessível ao usuário de serviço.
+    root = _service_root(svc)
+    user = getattr(svc, "service_user", "dayz")
     for mod, mod_dir in zip(svc.all_mods, svc.mod_dirs):
-        if not Path(mod_dir).exists():
+        mod_dir = Path(mod_dir)
+        if not mod_dir.exists():  # segue symlink; pendurado também cai aqui
             problems.append(f"conteúdo do mod ausente: {mod.name}")
+            continue
+        real = mod_dir.resolve()
+        try:
+            real.relative_to(root)
+        except ValueError:
+            problems.append(
+                f"conteúdo do mod {mod.name} resolve para fora da árvore do "
+                f"serviço ({real}) — provavelmente baixado como root e "
+                f"inacessível ao usuário '{user}'. Rebaixe como o usuário de "
+                f"serviço (o DayZops já faz isso) ou rode: "
+                f"sudo chown -R {user}:{user} {root}"
+            )
 
     return problems
 
