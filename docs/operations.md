@@ -19,19 +19,19 @@ systemctl status dayz
 ### Start
 
 ```bash
-dayzctl start
+dayzops start
 ```
 
 ### Stop
 
 ```bash
-dayzctl stop
+dayzops stop
 ```
 
 ### Restart
 
 ```bash
-dayzctl restart
+dayzops restart
 ```
 
 ---
