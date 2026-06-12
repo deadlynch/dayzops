@@ -38,29 +38,13 @@ def test_password_comes_from_env_not_config(monkeypatch):
 
 def test_no_password_when_env_absent(monkeypatch):
     monkeypatch.delenv(STEAM_PASSWORD_ENV, raising=False)
-    monkeypatch.setattr(
-        SteamCmd,
-        "_read_password_file",
-        lambda self: None,
-    )
     sc = SteamCmd("alice")
     cmd = sc.build_command([])
-    # Só "+login alice", sem terceiro elemento de senha.
+    # Sem a env var: só "+login alice", sem terceiro elemento de senha.
+    # (O steamcmd usa credencial em cache ou pede interativo.)
     login_idx = cmd.index("+login")
     assert cmd[login_idx + 1] == "alice"
-
-
-def test_password_can_fallback_to_env_file(monkeypatch):
-    monkeypatch.delenv(STEAM_PASSWORD_ENV, raising=False)
-    monkeypatch.setattr(
-        SteamCmd,
-        "_read_password_file",
-        lambda self: "file-pass",
-    )
-    sc = SteamCmd("alice")
-    cmd = sc.build_command([])
-    assert "file-pass" in cmd
-    assert "file-pass" not in sc._redact(cmd)
+    assert len(cmd) == login_idx + 2 + 1  # +login, alice, +quit
 
 
 def test_nonzero_exit_raises(monkeypatch):
@@ -78,19 +62,37 @@ def test_success_returns_result(monkeypatch):
     assert result.returncode == 0
 
 
-def test_download_mod_uses_game_appid(monkeypatch):
+def test_download_mod_uses_game_appid(monkeypatch, tmp_path):
     monkeypatch.delenv(STEAM_PASSWORD_ENV, raising=False)
     captured = {}
 
+    real = tmp_path / "steamroot" / "1559212036"
+    real.mkdir(parents=True)
+
     def runner(cmd):
         captured["cmd"] = cmd
-        return _fake_result(0)
+        return _fake_result(0, f'Success. Downloaded item 1559212036 to "{real}" (5 bytes)')
 
     sc = SteamCmd("alice", runner=runner)
-    sc.download_mod(1559212036)
+    workshop = tmp_path / "workshop"
+    sc.download_mod(1559212036, workshop_dir=workshop)
 
     cmd = captured["cmd"]
     assert "+workshop_download_item" in cmd
     assert DAYZ_APPID in cmd
     assert "1559212036" in cmd
     assert "validate" in cmd
+
+    # materializou: workshop/<id> é symlink para o caminho real do steamcmd
+    link = workshop / "1559212036"
+    assert link.is_symlink()
+    assert link.resolve() == real.resolve()
+
+
+def test_download_mod_handles_missing_path(monkeypatch, tmp_path):
+    monkeypatch.delenv(STEAM_PASSWORD_ENV, raising=False)
+    # saída sem a linha "Downloaded item ... to" -> não cria symlink, não quebra
+    sc = SteamCmd("alice", runner=lambda c: _fake_result(0, "sem caminho aqui"))
+    workshop = tmp_path / "workshop"
+    sc.download_mod(42, workshop_dir=workshop)
+    assert not (workshop / "42").exists()
