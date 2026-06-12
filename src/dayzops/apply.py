@@ -17,7 +17,7 @@ from dayzops.systemd import (
 
 log = get_logger("apply")
 
-_SYMBOL = {"install": "+", "create": "+", "update": "~", "remove": "-"}
+_SYMBOL = {"install": "+", "create": "+", "update": "~", "remove": "-", "download": "v"}
 
 
 @dataclass
@@ -80,6 +80,15 @@ def desired_units(svc) -> dict:
 # Diff: desejado vs. real
 # ---------------------------------------------------------------------------
 
+def _content_missing(svc, mod) -> bool:
+    """True se o conteúdo do mod não está no disco (mesmo critério do keys.py).
+
+    Cobre o diretório ausente e o symlink pendurado (alvo inexistente),
+    pois Path.exists() segue o link.
+    """
+    return not (svc.workshop_dir / str(mod.id)).exists()
+
+
 def build_plan(svc, *, units_dir: Path) -> Plan:
     plan = Plan()
 
@@ -87,7 +96,12 @@ def build_plan(svc, *, units_dir: Path) -> Plan:
     if not (svc.install_dir / "DayZServer").exists():
         plan.changes.append(Change("server", "install", f"instalar em {svc.install_dir}"))
 
-    # 2) Mods: diff calculado sem mutar nada.
+    # 2) Mods: conteúdo declarado mas ausente no disco -> baixar.
+    for mod in svc.all_mods:
+        if _content_missing(svc, mod):
+            plan.changes.append(Change("mod", "download", f"baixar conteúdo {mod.name}"))
+
+    # 3) Mods: diff de symlinks (calculado sem mutar nada).
     mod_actions = svc.modsync.plan(svc.all_mods)
     for name in mod_actions["create"]:
         plan.changes.append(Change("mod", "create", f"symlink {name}"))
@@ -130,6 +144,12 @@ def run_apply(svc, *, units_dir: Path, dry_run: bool = False, lock_file=None) ->
 
         if any(c.resource == "server" and c.action == "install" for c in plan.changes):
             svc.steam.install_or_update_server(svc.install_dir)
+
+        # Baixa o conteúdo de mods declarados que faltam no disco, antes de
+        # criar os symlinks e reconstruir as keys (senão o link fica pendurado).
+        for mod in svc.all_mods:
+            if _content_missing(svc, mod):
+                svc.steam.download_mod(mod.id, workshop_dir=svc.workshop_dir)
 
         svc.modsync.sync(svc.all_mods)
         svc.keys.rebuild(svc.mod_dirs)  # keys seguem os mods (ADR-0004)
