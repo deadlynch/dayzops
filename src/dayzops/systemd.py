@@ -10,6 +10,11 @@ SERVER_SERVICE = "dayz"         # dayz.service  (systemctl start dayz)
 UPDATE_SERVICE = "dayz-update"  # dayz-update.service + dayz-update.timer
 PRUNE_SERVICE = "dayz-prune"    # dayz-prune.service + dayz-prune.timer
 
+# Arquivo de ambiente do serviço de update — guarda DAYZOPS_STEAM_PASSWORD
+# fora do server.yaml. O prefixo '-' no EnvironmentFile torna-o opcional:
+# o serviço não falha se o arquivo ainda não existir.
+ENV_FILE = "/etc/dayzops.env"
+
 
 class SystemdError(Exception):
     pass
@@ -54,6 +59,7 @@ def render_update_service(*, dayzops_bin: str = "dayzops", user: str = "dayz") -
         "[Service]\n"
         "Type=oneshot\n"
         f"User={user}\n"
+        f"EnvironmentFile=-{ENV_FILE}\n"
         f"ExecStart={dayzops_bin} update\n"
     )
 
