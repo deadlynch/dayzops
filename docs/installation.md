@@ -1,176 +1,93 @@
 # Installation
 
+This is the detailed install reference. For a quick start, see the
+[README](../README.md).
+
 ## Requirements
 
-### Operating System
+**Supported Linux:** Debian 12+, Ubuntu 24.04+, Rocky 9+, Arch / CachyOS.
 
-Supported Linux distributions:
+**Dependencies** (the installer attempts to install these): `steamcmd`,
+`bash`, `curl`, `tar`, `gzip`, `findutils`, `coreutils`, `rsync`, `systemd`.
 
-- CachyOS
-- Arch Linux
-- Debian 12+
-- Ubuntu 24.04+
-- Rocky Linux 9+
+**Steam account** owning DayZ — required for server installation and Workshop
+mod downloads.
 
-### Dependencies
+## Layout
 
-Required packages:
-
-```bash
-steamcmd
-bash
-curl
-tar
-gzip
-findutils
-coreutils
-rsync
-yq
-systemd
-```
-
-### Steam Account
-
-A Steam account owning DayZ is required for:
-
-- DayZ Dedicated Server installation
-- Workshop mod downloads
-- Mod updates
-
----
-
-## Installation Layout
-
-Default installation path:
+Default installation root: `/srv/dayz`.
 
 ```text
 /srv/dayz
+├── backups/     # timestamped .tar.gz archives
+├── config/      # server.yaml
+├── server/      # DayZ dedicated server (+ @mod symlinks, keys/)
+├── state/       # generated JSON state inventory
+└── workshop/    # downloaded Workshop content
 ```
 
-Directory structure:
-
-```text
-/srv/dayz
-├── backups/
-├── bin/
-├── config/
-├── custom/
-├── logs/
-├── runtime/
-├── server/
-├── state/
-└── workshop/
-```
-
----
-
-## Installation
-
-Run:
+## Install
 
 ```bash
-sudo ./install.sh
+git clone https://github.com/deadlynch/dayzops.git
+cd dayzops
+sudo ./scripts/install.sh
 ```
 
-The installer will:
+The installer is idempotent and:
 
-1. Create required directories
-2. Create dayz service user
-3. Install SteamCMD dependencies
-4. Install DayZ Dedicated Server
-5. Generate systemd units
-6. Create default configuration
-7. Configure automatic updates
+1. Creates the directory tree under `/srv/dayz`
+2. Creates the `dayz` system user
+3. Installs OS dependencies (best-effort; review SteamCMD on your distro)
+4. Installs the `dayzops` package (the `dayzops` command lands on `PATH`)
+5. Generates the systemd units (`dayz.service`, `dayz-update.{service,timer}`,
+   `dayz-prune.{service,timer}`)
+6. Writes a default `/srv/dayz/config/server.yaml`
+7. Creates `/etc/dayzops.env` (protected, for the Steam password)
+8. Enables the update and prune timers
 
----
+Override defaults with environment variables:
 
-## Configuration
-
-Main configuration file:
-
-```text
-/srv/dayz/config/server.yaml
+```bash
+sudo DAYZ_HOME=/opt/dayz DAYZ_USER=dayz SCHEDULE=05:00 ./scripts/install.sh
 ```
 
-Example:
+## Configure
 
-```yaml
-server:
-  name: "Chernarus Vanilla++"
-
-steam:
-  username: "USERNAME"
-
-mods: []
-
-servermods: []
-
-backup:
-  retention_days: 14
-
-logs:
-  retention_days: 30
-```
-
----
-
-## Validate Installation
-
-Verify configuration:
+Edit `/srv/dayz/config/server.yaml` (full example and field reference in the
+[README](../README.md#configuration)). Then validate:
 
 ```bash
 dayzops validate-config
 ```
 
-Verify service:
+### Steam password
+
+The password is never stored in `server.yaml`. The installer creates
+`/etc/dayzops.env` (mode 600, owned by `dayz`); add your password there:
 
 ```bash
-systemctl status dayz
+sudoedit /etc/dayzops.env
+# DAYZOPS_STEAM_PASSWORD=your_password
 ```
 
-Verify server state:
+The `dayz-update.service` reads this file via `EnvironmentFile`. For manual
+runs, export `DAYZOPS_STEAM_PASSWORD` in your shell. If the account uses Steam
+Guard / 2FA, run one manual `dayzops update` first to authenticate
+interactively and cache the credential.
+
+## First startup
 
 ```bash
+dayzops apply              # install server, sync mods + keys, write units
+dayzops start              # or: sudo systemctl start dayz
 dayzops status
 ```
 
----
-
-## First Startup
-
-Start server:
+## Verify
 
 ```bash
-sudo systemctl start dayz
+dayzops validate-config
+systemctl status dayz
+dayzops status
 ```
-
-Or:
-
-```bash
-dayzops start
-```
-
-Verify logs:
-
-```bash
-journalctl -u dayz -f
-```
-
----
-
-## Automatic Updates
-
-Enable update timer:
-
-```bash
-systemctl enable dayz-update.timer
-systemctl start dayz-update.timer
-```
-
-Verify:
-
-```bash
-systemctl list-timers
-```
-
-The update workflow executes daily at 04:00 by default.
