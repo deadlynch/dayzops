@@ -10,6 +10,7 @@ from dayzops.lock import LockError
 from dayzops.mods import parse_mods, add_mod, remove_mod
 from dayzops.ops import UpdateError
 from dayzops.systemd import SystemdError
+from dayzops.templates_render import write_server_yaml
 
 _STANDALONE = {"version", "validate-config"}
 
@@ -27,6 +28,27 @@ def _build_parser() -> argparse.ArgumentParser:
     apply_p = sub.add_parser("apply")
     apply_p.add_argument("--dry-run", action="store_true",
                          help="mostra o que mudaria sem alterar nada")
+
+    render_p = sub.add_parser(
+        "render-config",
+        help="renderiza o template do server.yaml (usado pelo install.sh)",
+    )
+    render_p.add_argument(
+        "--output", type=Path, required=True,
+        help="caminho de destino do server.yaml",
+    )
+    render_p.add_argument(
+        "--dayz-home", default="/srv/dayz",
+        help="base do install (substitui {{DAYZ_HOME}})",
+    )
+    render_p.add_argument(
+        "--schedule", default="04:00",
+        help="horário do update automático (substitui {{SCHEDULE}})",
+    )
+    render_p.add_argument(
+        "--overwrite", action="store_true",
+        help="sobrescreve o arquivo se já existir (default: mantém)",
+    )
 
     mod_p = sub.add_parser("mod")
     mod_sub = mod_p.add_subparsers(dest="mod_action")
@@ -70,6 +92,26 @@ def _cmd_validate_config(config_path: Path) -> int:
         return 1
     print("Configuration valid")
     return 0
+
+
+def _cmd_render_config(args) -> int:
+    """Renderiza o template canônico do server.yaml em args.output.
+
+    Usado pelo install.sh pra evitar o heredoc inline que divergia do
+    examples/server.yaml. Template fica em src/dayzops/templates/.
+    """
+    try:
+        path = write_server_yaml(
+            args.output,
+            dayz_home=args.dayz_home,
+            schedule=args.schedule,
+            overwrite=args.overwrite,
+        )
+        print(str(path))
+        return 0
+    except OSError as exc:
+        print(f"Erro ao escrever {args.output}: {exc}")
+        return 1
 
 
 def _cmd_mod(config: dict, config_path: Path, args) -> int:
@@ -217,6 +259,8 @@ def main(argv=None) -> int:
         return _cmd_version()
     if command == "validate-config":
         return _cmd_validate_config(args.config)
+    if command == "render-config":
+        return _cmd_render_config(args)
 
     try:
         config = _validated_config(args.config)

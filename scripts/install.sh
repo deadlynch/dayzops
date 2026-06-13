@@ -87,38 +87,24 @@ PY
     systemctl daemon-reload
 }
 
-# 6) Configuração default (não sobrescreve se já existir)
+# 6) Configuração default (não sobrescreve se já existir).
+# Renderiza pelo template canônico em src/dayzops/templates/server.yaml.template
+# via 'dayzops render-config' — evita divergência com examples/server.yaml,
+# que era heredoc inline mantido em paralelo.
 create_config() {
     if [[ -f "${CONFIG}" ]]; then
         log "config já existe em ${CONFIG} (mantido)"
         return
     fi
-    log "criando config default em ${CONFIG}"
-    cat > "${CONFIG}" <<YAML
-server:
-  name: "Chernarus Vanilla++"
-  map: chernarus
-  port: 2302
-
-steam:
-  username: "USERNAME"
-
-paths:
-  install_dir: ${DAYZ_HOME}/server
-  workshop_dir: ${DAYZ_HOME}/workshop
-  mods_dir: ${DAYZ_HOME}/server
-  backups_dir: ${DAYZ_HOME}/backups
-  state_dir: ${DAYZ_HOME}/state
-
-mods: []
-servermods: []
-
-backup:
-  retention_days: 14
-
-updates:
-  schedule: "${SCHEDULE}"
-YAML
+    log "renderizando config default em ${CONFIG}"
+    mkdir -p "$(dirname "${CONFIG}")"
+    if ! dayzops render-config \
+        --output "${CONFIG}" \
+        --dayz-home "${DAYZ_HOME}" \
+        --schedule "${SCHEDULE}" > /dev/null; then
+        log "ERRO: dayzops render-config falhou; verifique a instalação do pacote"
+        exit 1
+    fi
     chown "${DAYZ_USER}:${DAYZ_USER}" "${CONFIG}"
 }
 

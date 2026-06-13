@@ -20,11 +20,11 @@ network:
   steam_query_port: 27016
 
 paths:
-  install_dir: /srv/dayz/server
-  workshop_dir: /srv/dayz/workshop
-  mods_dir: /srv/dayz/server
-  backups_dir: /srv/dayz/backups
-  state_dir: /srv/dayz/state
+  install_dir: {{DAYZ_HOME}}/server
+  workshop_dir: {{DAYZ_HOME}}/workshop
+  mods_dir: {{DAYZ_HOME}}/server
+  backups_dir: {{DAYZ_HOME}}/backups
+  state_dir: {{DAYZ_HOME}}/state
   storage_dir: null        # Se setado, vira -storage=path. Default null = padrão DayZ.
 
 mods: []
@@ -47,7 +47,7 @@ backup:
 
 updates:
   enabled: true
-  schedule: "04:00"
+  schedule: "{{SCHEDULE}}"
 
 healthcheck:
   enabled: true

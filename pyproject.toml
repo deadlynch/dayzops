@@ -25,3 +25,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# Empacotar o template canônico do server.yaml junto com o pacote.
+# Necessário para `dayzops render-config` funcionar quando instalado via pip
+# (sem o repo presente na máquina) — caso típico do install.sh em servidores.
+dayzops = ["templates/*.template"]
