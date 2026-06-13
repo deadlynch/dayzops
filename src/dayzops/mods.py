@@ -3,6 +3,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from dayzops.fsperm import chown_path
 from dayzops.logger import get_logger
 
 log = get_logger("mods")
@@ -50,9 +51,10 @@ class ModSync:
     Idempotente: só mexe em symlinks '@...' que apontam pro workshop.
     """
 
-    def __init__(self, workshop_dir: Path, server_dir: Path):
+    def __init__(self, workshop_dir: Path, server_dir: Path, service_user: str | None = None):
         self.workshop_dir = Path(workshop_dir)
         self.server_dir = Path(server_dir)
+        self.service_user = service_user
 
     def _link_path(self, mod: Mod) -> Path:
         return self.server_dir / mod.name
@@ -98,19 +100,29 @@ class ModSync:
         return result
 
     def sync(self, mods: list[Mod]) -> dict:
-        """Converge os symlinks para o conjunto `mods` (executa o plan)."""
+        """Converge os symlinks para o conjunto `mods` (executa o plan).
+
+        Cada symlink criado/atualizado é chowned para o service_user (via
+        lchown — o link em si, não o alvo). Sem isso, links ficam root:root
+        quando dayzops apply roda via sudo, e o servidor (rodando como dayz)
+        não consegue ler.
+        """
         self.server_dir.mkdir(parents=True, exist_ok=True)
+        chown_path(self.server_dir, self.service_user)
         actions = self.plan(mods)
         by_name = {m.name: m for m in mods}
 
         for name in actions["create"]:
             mod = by_name[name]
-            self._link_path(mod).symlink_to(self._target_path(mod))
+            link = self._link_path(mod)
+            link.symlink_to(self._target_path(mod))
+            chown_path(link, self.service_user)
         for name in actions["update"]:
             mod = by_name[name]
             link = self._link_path(mod)
             link.unlink()
             link.symlink_to(self._target_path(mod))
+            chown_path(link, self.service_user)
         for name in actions["remove"]:
             (self.server_dir / name).unlink()
 
