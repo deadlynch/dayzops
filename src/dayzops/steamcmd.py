@@ -6,6 +6,7 @@ import sys
 
 from pathlib import Path
 
+from dayzops.fsperm import chown_path, chown_recursive
 from dayzops.logger import get_logger
 
 log = get_logger("steamcmd")
@@ -269,6 +270,7 @@ class SteamCmd:
 
         real_path = Path(match.group(1))
         workshop_dir.mkdir(parents=True, exist_ok=True)
+        chown_path(workshop_dir, self.run_as)
 
         if target.is_symlink():
             if os.readlink(target) == str(real_path):
@@ -280,4 +282,9 @@ class SteamCmd:
             return
 
         target.symlink_to(real_path)
+        chown_path(target, self.run_as)
+        # Conteúdo real do mod (pode ter sido baixado como root se o
+        # steamcmd rodou sem o sudo -u wrap) — garante dayz:dayz.
+        if real_path.exists():
+            chown_recursive(real_path, self.run_as)
         log.info("workshop item %s -> %s", workshop_id, real_path)
