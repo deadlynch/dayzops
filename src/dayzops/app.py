@@ -54,6 +54,11 @@ class Services:
         """Diretórios de conteúdo dos mods ativos (workshop/<id>)."""
         return [self.workshop_dir / str(m.id) for m in self.all_mods]
 
+    @property
+    def mod_dirs_with_id(self) -> list:
+        """Como mod_dirs, mas com (mod_id, dir) — preserva rastreio em keys.sync."""
+        return [(m.id, self.workshop_dir / str(m.id)) for m in self.all_mods]
+
 
 def build_services(config: dict, *, steam_runner=None, control_runner=None) -> Services:
     install_dir = Path(_get(config, "paths", "install_dir"))
@@ -70,8 +75,8 @@ def build_services(config: dict, *, steam_runner=None, control_runner=None) -> S
         store=store,
         steam=SteamCmd(username, runner=steam_runner, run_as=service_user),
         backup=BackupManager(install_dir, backups_dir, store=store),
-        modsync=ModSync(workshop_dir, install_dir),
-        keys=KeyManager(install_dir),
+        modsync=ModSync(workshop_dir, install_dir, service_user=service_user),
+        keys=KeyManager(install_dir, store=store, service_user=service_user),
         control=ServerControl(runner=control_runner),
         install_dir=install_dir,
         workshop_dir=workshop_dir,
@@ -99,7 +104,7 @@ def build_update_plan(svc: Services) -> UpdatePlan:
         start_server=svc.control.start,
         update_mods=lambda: _sync_mods(svc),
         validate=lambda: verify_install(svc),
-        sync_keys=lambda: svc.keys.rebuild(svc.mod_dirs),
+        sync_keys=lambda: svc.keys.sync(svc.mod_dirs_with_id),
         health_check=lambda: HealthChecker(svc.control).wait(),
     )
 
