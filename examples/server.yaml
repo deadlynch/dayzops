@@ -3,12 +3,17 @@ server:
   map: "namalsk"
   port: 2302
   max_players: 60
+  # Launch flags opcionais (Bohemia wiki). Omitir/null = não passar a flag.
+  cpu_count: null          # int. -cpuCount=N. Default omitido (engine decide).
+  limit_fps: null          # int 1-200. -limitFPS=N. Útil em servers ociosos.
+  file_patching: false     # bool. -filePatching. Só pra desenvolvimento de mod.
+  extra_args: []           # list[str]. Flags não cobertas (ex: ["-cfgGameplayFile=cfggameplay.json"]).
 
 steam:
   username: "USERNAME"
 
 instance:
-  profile: "profiles"
+  profile: "profiles"      # Vai pro -profiles={install_dir}/{profile} no ExecStart
   config: "serverDZ.cfg"
 
 network:
@@ -20,6 +25,7 @@ paths:
   mods_dir: "/srv/dayz/mods"
   backups_dir: "/srv/dayz/backups"
   state_dir: "/srv/dayz/state"
+  storage_dir: null        # Se setado, vira -storage=path. Default null = padrão DayZ.
 
 mods:
   - id: 1559212036
