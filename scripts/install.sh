@@ -32,6 +32,10 @@ create_dirs() {
     for d in "${dirs[@]}"; do
         mkdir -p "${DAYZ_HOME}/${d}"
     done
+    # subdir do server que o ExecStart referencia via -profiles=
+    # (Bohemia: "Path to the folder containing server profile. By default,
+    # server logs are written to the server profile's directory.")
+    mkdir -p "${DAYZ_HOME}/server/profiles"
 }
 
 # 2) Usuário de serviço
