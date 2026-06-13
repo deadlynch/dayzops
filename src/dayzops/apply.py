@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from dayzops.fsperm import chown_path, chown_recursive
 from dayzops.lock import global_lock
 from dayzops.logger import get_logger
 from dayzops.mods import startup_params
@@ -49,14 +50,66 @@ class Plan:
 # ---------------------------------------------------------------------------
 
 def build_exec_start(svc) -> str:
-    """Linha ExecStart do servidor, derivada do config (mods em ordem)."""
+    """Linha ExecStart do servidor, derivada do config (mods em ordem).
+
+    Inclui flags recomendadas pela Bohemia (DayZ:Server_Configuration wiki):
+    -BEpath, -profiles são essenciais para handshake correto do BattlEye e
+    isolamento de logs/RCon dentro do install_dir (sem isso, profiles caem
+    em $HOME/.local/share/DayZ Other Profiles/ com path bagunçado, e BE
+    procura config em path default que varia entre versões).
+    -doLogs, -adminLog, -netLog, -freezeCheck são higiene operacional padrão.
+
+    Opcionais configurados em server.yaml:
+    - server.cpu_count (int)        → -cpuCount=N
+    - server.limit_fps (int)        → -limitFPS=N
+    - server.file_patching (bool)   → -filePatching (só pra dev de mod)
+    - server.extra_args (list[str]) → flags não cobertas, em ordem
+    - paths.storage_dir (str)       → -storage=path
+    """
     server = svc.config.get("server", {})
     instance = svc.config.get("instance", {})
+    paths = svc.config.get("paths", {})
     port = server.get("port", 2302)
     server_cfg = instance.get("config", "serverDZ.cfg")
+    profile = instance.get("profile", "profiles")
 
-    parts = [str(svc.install_dir / "DayZServer"), f"-config={server_cfg}", f"-port={port}"]
+    parts = [
+        str(svc.install_dir / "DayZServer"),
+        f"-config={server_cfg}",
+        f"-port={port}",
+    ]
     parts += startup_params(svc.mods, svc.servermods)
+
+    # Flags Bohemia obrigatórias (hardcoded)
+    parts += [
+        f"-BEpath={svc.install_dir}/battleye",
+        f"-profiles={svc.install_dir}/{profile}",
+        "-doLogs",
+        "-adminLog",
+        "-netLog",
+        "-freezeCheck",
+    ]
+
+    # Flags opcionais do server.yaml
+    cpu_count = server.get("cpu_count")
+    if cpu_count:
+        parts.append(f"-cpuCount={int(cpu_count)}")
+
+    limit_fps = server.get("limit_fps")
+    if limit_fps:
+        parts.append(f"-limitFPS={int(limit_fps)}")
+
+    if server.get("file_patching"):
+        parts.append("-filePatching")
+
+    storage_dir = paths.get("storage_dir")
+    if storage_dir:
+        parts.append(f"-storage={storage_dir}")
+
+    extra_args = server.get("extra_args") or []
+    for arg in extra_args:
+        parts.append(str(arg))
+
     return " ".join(parts)
 
 
@@ -126,6 +179,23 @@ def build_plan(svc, *, units_dir: Path) -> Plan:
 # Converge
 # ---------------------------------------------------------------------------
 
+def _ensure_runtime_dirs(svc) -> None:
+    """Garante diretórios que o ExecStart referencia (idempotente).
+
+    O ExecStart usa -profiles={install_dir}/{instance.profile}; se a pasta
+    não existe, o servidor falha ao escrever logs/BE config. install.sh
+    já cria isso na primeira instalação, mas servers existentes (antes do
+    fix) ou paths customizados via instance.profile podem cair aqui.
+    Chowna pra service_user porque o servidor (que roda como dayz) precisa
+    escrever logs/BE config dentro.
+    """
+    instance = svc.config.get("instance", {})
+    profile = instance.get("profile", "profiles")
+    profile_path = svc.install_dir / profile
+    profile_path.mkdir(parents=True, exist_ok=True)
+    chown_path(profile_path, svc.service_user)
+
+
 def run_apply(svc, *, units_dir: Path, dry_run: bool = False, lock_file=None) -> Plan:
     """Lê o desejado, compara com o real e converge só a diferença.
 
@@ -144,6 +214,10 @@ def run_apply(svc, *, units_dir: Path, dry_run: bool = False, lock_file=None) ->
 
         if any(c.resource == "server" and c.action == "install" for c in plan.changes):
             svc.steam.install_or_update_server(svc.install_dir)
+            # SteamCMD pode baixar arquivos como root quando o wrap sudo -u
+            # falha por alguma razão de ambiente; chown defensivo cobre.
+            # No-op em dev/CI sem root.
+            chown_recursive(svc.install_dir, svc.service_user)
 
         # Baixa o conteúdo de mods declarados que faltam no disco, antes de
         # criar os symlinks e reconstruir as keys (senão o link fica pendurado).
@@ -152,7 +226,13 @@ def run_apply(svc, *, units_dir: Path, dry_run: bool = False, lock_file=None) ->
                 svc.steam.download_mod(mod.id, workshop_dir=svc.workshop_dir)
 
         svc.modsync.sync(svc.all_mods)
-        svc.keys.rebuild(svc.mod_dirs)  # keys seguem os mods (ADR-0004)
+        # Sync incremental — preserva dayz.bikey (Bohemia) e qualquer key
+        # que o operador tenha colocado manualmente. Remove só keys de mods
+        # que saíram do server.yaml. (divergência #14 — substitui ADR-0004)
+        svc.keys.sync(svc.mod_dirs_with_id)
+
+        # Garante profiles/ etc. antes da unit ser ativada
+        _ensure_runtime_dirs(svc)
 
         units_dir.mkdir(parents=True, exist_ok=True)
         for name, content in desired_units(svc).items():
