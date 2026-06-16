@@ -84,6 +84,29 @@ def _resolve_password() -> str | None:
     return os.environ.get(STEAM_PASSWORD_ENV) or _read_password_from_env_file()
 
 
+def _clock_sync_state() -> bool | None:
+    """Estado de sincronia NTP via timedatectl. True/False, ou None se indeterminado.
+
+    Best-effort: se timedatectl não existe ou a saída é inesperada, devolve
+    None (não bloqueia). Só devolve False quando há evidência clara de
+    'System clock synchronized: no'.
+    """
+    if not shutil.which("timedatectl"):
+        return None
+    try:
+        out = subprocess.run(
+            ["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip().lower()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out in ("yes", "true", "1"):
+        return True
+    if out in ("no", "false", "0"):
+        return False
+    return None
+
+
 class SteamCmdError(Exception):
     pass
 
@@ -92,6 +115,15 @@ class SteamAuthError(SteamCmdError):
     """SteamCMD recusou login — credencial ausente, errada, ou Guard exigido.
 
     Mensagem é acionável (diz o que fazer), não stacktrace cru.
+    """
+
+
+class SteamPreflightError(SteamCmdError):
+    """Checagem prévia falhou ANTES de invocar o SteamCMD.
+
+    Pega problemas previsíveis (binário ausente, senha não configurada,
+    relógio fora de sincronia) e aborta com instrução clara, em vez de deixar
+    o SteamCMD pendurar num prompt interativo ou estourar genérico.
     """
 
 
@@ -205,8 +237,14 @@ class SteamCmd:
         password = _resolve_password()
         if password:
             env[STEAM_PASSWORD_ENV] = password
+        # stdin fechado: sob apply/update/timer NÃO há ninguém para digitar
+        # senha ou Steam Guard. Sem TTY, o SteamCMD falha imediatamente com
+        # mensagem (capturada e traduzida em run()) em vez de pendurar à espera
+        # de input — que era o caso do prompt travado com setas (^[[A). O login
+        # interativo de verdade vive em interactive_login(), que herda o stdin.
         proc = subprocess.Popen(
             command,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -236,6 +274,7 @@ class SteamCmd:
         do usuário de serviço. Independente do default_runner — aqui não
         capturamos saída para que o prompt do Guard apareça normalmente.
         """
+        self.preflight(require_password=False)
         command = self._wrap_as_user(
             [self.steamcmd_path, *self._login_args(), "+quit"]
         )
@@ -246,7 +285,43 @@ class SteamCmd:
             env[STEAM_PASSWORD_ENV] = password
         return subprocess.call(command, env=env)
 
+    def preflight(self, *, require_password: bool = True) -> None:
+        """Valida o que dá pra validar ANTES de invocar o SteamCMD.
+
+        Aborta com SteamPreflightError (mensagem acionável) quando:
+          - o binário do SteamCMD não existe / não é executável;
+          - a senha não está configurada (env nem EnvironmentFile) e é exigida;
+          - o relógio do sistema está fora de sincronia (NTP), o que faz o
+            handshake do Steam falhar de forma confusa.
+
+        Não toca a rede nem a conta — é barato e idempotente. Chamar no início
+        de apply/update/login evita falhas tardias e prompts pendurados.
+        """
+        # binário
+        if not self.is_available():
+            raise SteamPreflightError(
+                f"SteamCMD não encontrado em '{self.steamcmd_path}'. "
+                f"Rode o instalador (scripts/install.sh) ou ajuste "
+                f"paths.steamcmd_bin no server.yaml."
+            )
+        # senha
+        if require_password and not _resolve_password():
+            raise SteamPreflightError(
+                f"Senha do Steam não configurada para '{self.username}'. "
+                f"Edite {ENV_FILE_PATH} e descomente a linha "
+                f"'{STEAM_PASSWORD_ENV}=suasenha' (sem '#' na frente), "
+                f"ou exporte a variável antes de rodar."
+            )
+        # relógio (best-effort; só avisa se claramente dessincronizado)
+        skew = _clock_sync_state()
+        if skew is False:
+            log.warning(
+                "relógio do sistema parece fora de sincronia (NTP). Se o login "
+                "falhar, rode: sudo timedatectl set-ntp true"
+            )
+
     def run(self, steam_actions: list[str]):
+        self.preflight()
         command = self.build_command(steam_actions)
         log.info("steamcmd: %s", " ".join(self._redact(command)))
         result = self._runner(command)
@@ -274,6 +349,20 @@ class SteamCmd:
                 raise SteamAuthError(
                     "SteamCMD: a conta exige Steam Guard. Rode uma vez "
                     "(interativo): sudo dayzops steam-login"
+                )
+            low = output.lower()
+            if "rate limit" in low or "too many" in low:
+                raise SteamAuthError(
+                    "SteamCMD: limite de tentativas atingido (rate limit). "
+                    "O Steam bloqueia temporariamente após várias falhas de "
+                    "login. Espere ~30 min e confira a senha em "
+                    f"{ENV_FILE_PATH} antes de tentar de novo."
+                )
+            if "no subscription" in low:
+                raise SteamCmdError(
+                    f"SteamCMD: a conta '{self.username}' não possui o DayZ. "
+                    f"O servidor (app {DAYZ_SERVER_APPID}) exige uma conta que "
+                    f"seja dona do jogo — login anônimo não funciona."
                 )
             raise SteamCmdError(
                 f"steamcmd falhou (exit {result.returncode}).\nSaída final:\n{tail}"
