@@ -3,6 +3,8 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 
 from pathlib import Path
 
@@ -141,6 +143,7 @@ class SteamCmd:
         *,
         steamcmd_path: str | None = None,
         timeout: int = 1800,
+        idle_timeout: int = 120,
         runner=None,
         run_as: str | None = None,
     ):
@@ -151,6 +154,11 @@ class SteamCmd:
         # a menos que nenhum caminho conhecido exista.
         self.steamcmd_path = steamcmd_path or _default_steamcmd_path()
         self.timeout = timeout
+        # Watchdog de inatividade: se o SteamCMD ficar este nº de segundos SEM
+        # produzir nenhuma saída nova, presumimos que travou (ex.: esperando um
+        # input que nunca virá) e o matamos com erro acionável — em vez de
+        # deixar o terminal/timer pendurado indefinidamente.
+        self.idle_timeout = idle_timeout
         # Usuário de serviço sob o qual o steamcmd deve rodar. Quando o DayZops
         # está como root, baixar como root joga o conteúdo do Workshop em
         # /root/.steam — ilegível pelo usuário de serviço. Rodando como esse
@@ -227,9 +235,12 @@ class SteamCmd:
           por padrão, então NÃO basta a senha estar no os.environ do pai;
           ela tem que ir explicitamente no env do Popen, e o sudo é instruído
           a preservá-la via --preserve-env (acrescentado no _wrap_as_user).
-        - stdin herda o terminal pai: na primeira execução sem cache, o
-          operador pode digitar Steam Guard (interativo). Sob timer/serviço
-          sem TTY, simplesmente falha com mensagem acionável.
+        - stdin é FECHADO (/dev/null): este runner é o caminho não-interativo
+          (apply/update/timer). Sem TTY, o SteamCMD não consegue pendurar à
+          espera de senha/Guard. O login interativo vive em interactive_login().
+        - um watchdog de inatividade encerra o processo se ele ficar
+          self.idle_timeout segundos sem produzir saída — defesa final contra
+          qualquer trava silenciosa, com erro acionável em vez de cursor parado.
         - stdout/stderr saem em tempo real (vê a porcentagem) e são gravados
           em buffer para _link_workshop_item e para mensagens de erro.
         """
@@ -251,17 +262,58 @@ class SteamCmd:
             bufsize=1,
             env=env,
         )
-        buf: list[str] = []
         assert proc.stdout is not None
-        try:
-            for line in proc.stdout:
-                sys.stderr.write(line)
-                sys.stderr.flush()
-                buf.append(line)
-            returncode = proc.wait(timeout=self.timeout)
-        except subprocess.TimeoutExpired:
+
+        # A leitura roda numa thread para que o loop principal possa vigiar
+        # inatividade. Cada linha recebida atualiza last_output; se o intervalo
+        # sem nenhuma saída ultrapassar idle_timeout, presumimos trava e
+        # matamos o processo com erro acionável.
+        buf: list[str] = []
+        last_output = [time.monotonic()]
+        done = threading.Event()
+
+        def _pump():
+            try:
+                for line in proc.stdout:
+                    sys.stderr.write(line)
+                    sys.stderr.flush()
+                    buf.append(line)
+                    last_output[0] = time.monotonic()
+            finally:
+                done.set()
+
+        reader = threading.Thread(target=_pump, daemon=True)
+        reader.start()
+
+        start = time.monotonic()
+        killed_reason = None
+        while not done.wait(timeout=1.0):
+            now = time.monotonic()
+            if self.idle_timeout and (now - last_output[0]) > self.idle_timeout:
+                killed_reason = (
+                    f"SteamCMD ficou {self.idle_timeout}s sem responder "
+                    f"(possível prompt travado, credencial ausente ou rede). "
+                    f"Processo encerrado. Confira a senha em {ENV_FILE_PATH}; "
+                    f"se a conta usa Steam Guard, rode antes: "
+                    f"sudo dayzops steam-login."
+                )
+                break
+            if self.timeout and (now - start) > self.timeout:
+                killed_reason = (
+                    f"SteamCMD excedeu o tempo total de {self.timeout}s. "
+                    f"Processo encerrado."
+                )
+                break
+
+        if killed_reason is not None:
             proc.kill()
-            raise
+            proc.wait()
+            reader.join(timeout=5)
+            tail = "".join(buf)[-500:]
+            raise SteamCmdError(f"{killed_reason}\nSaída final:\n{tail}")
+
+        reader.join(timeout=5)
+        returncode = proc.wait()
         return subprocess.CompletedProcess(
             args=command, returncode=returncode, stdout="".join(buf), stderr=""
         )
