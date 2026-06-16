@@ -18,6 +18,8 @@ system to match it.
   nothing the second time.
 - **Atomic updates.** Updates run under a global lock with an automatic
   rollback: if validation fails, the previous version is restored.
+- **Fails loud, never silent.** Every external call has an actionable error and
+  cannot hang indefinitely — see *How DayZops handles failures*.
 
 ## Requirements
 
@@ -28,9 +30,9 @@ system to match it.
 - Root access — the installer creates a system user, directories under `/srv`,
   and systemd units.
 - **A Steam account that owns DayZ.** Unlike most dedicated servers, the DayZ
-  server build (app `223350`) is **not** available via anonymous login; you
-  must authenticate with an account that owns the game. Workshop mods are pulled
-  via the client app `221100`.
+  server build (app `223350`) is **not** available via anonymous login; you must
+  authenticate with an account that owns the game. Workshop mods are pulled via
+  the client app `221100`.
 
 ## Installation
 
@@ -47,15 +49,15 @@ The installer is idempotent (safe to re-run) and, in order:
 3. Installs OS dependencies. On Debian/Ubuntu it enables the `i386` architecture
    and installs `rsync`, `python3-venv`, `python3-pip`, `lib32gcc-s1`, …; on Arch
    it enables the `multilib` repo and installs the equivalents.
-4. Installs **SteamCMD** from Valve's official tarball into
-   `/srv/dayz/steamcmd`. SteamCMD is deliberately **not** installed from distro
-   packages — it is absent from the default repositories on every supported
-   distro (Debian `non-free`, Ubuntu `multiverse`, Arch AUR), so the tarball is
-   the portable, identical-everywhere path.
-5. Installs the `dayzops` package into a dedicated virtualenv at
-   `/srv/dayz/.venv` and exposes the `dayzops` command via a symlink in
-   `/usr/local/bin`. The virtualenv avoids the `externally-managed-environment`
-   (PEP 668) restriction on modern distros and keeps the system Python clean.
+4. Installs **SteamCMD** from Valve's official tarball into `/srv/dayz/steamcmd`.
+   SteamCMD is deliberately **not** installed from distro packages — it is absent
+   from the default repositories on every supported distro (Debian `non-free`,
+   Ubuntu `multiverse`, Arch AUR), so the tarball is the portable,
+   identical-everywhere path.
+5. Installs the `dayzops` package into a dedicated virtualenv at `/srv/dayz/.venv`
+   and exposes the `dayzops` command via a symlink in `/usr/local/bin`. The
+   virtualenv avoids the `externally-managed-environment` (PEP 668) restriction
+   on modern distros and keeps the system Python clean.
 6. Generates the systemd units, writes a default `server.yaml`, creates
    `/etc/dayzops.env` (mode 600) for the Steam password, and enables the update
    and prune timers.
@@ -74,16 +76,17 @@ shim:
 ```
 
 > **SteamCMD path.** DayZops locates the SteamCMD binary automatically
-> (`/srv/dayz/steamcmd/steamcmd.sh` first, then the system PATH). It always runs
+> (`/srv/dayz/steamcmd/steamcmd.sh` first, then the system PATH), or you can set
+> `paths.steamcmd_bin` in `server.yaml` to pin it explicitly. It always runs
 > SteamCMD as the `dayz` user via `sudo -H -u dayz`, never as root — this keeps
-> the Steam cache under the service user's home and avoids root-owned
-> `~/.steam` directories that would break later updates.
+> the Steam cache under the service user's home and avoids root-owned `~/.steam`
+> directories that would break later updates.
 
 ## Steam authentication & Steam Guard
 
 The password is read from the `DAYZOPS_STEAM_PASSWORD` environment variable (or
-`/etc/dayzops.env`) and is **never** stored in `server.yaml`. It is redacted
-from logs, along with the account name. How the first login behaves depends on
+`/etc/dayzops.env`) and is **never** stored in `server.yaml`. It is redacted from
+logs, along with the account name. How the first login behaves depends on
 whether the account uses Steam Guard.
 
 ### Account without Steam Guard
@@ -113,33 +116,61 @@ sudo dayzops apply               # finds the cached token, no prompt
 ```
 
 `steam-login` inherits the terminal so the Guard prompt shows correctly, and
-runs SteamCMD as the `dayz` user with the right `HOME`, so the cached token
-lands exactly where the automated runs look for it.
+runs SteamCMD as the `dayz` user with the right `HOME`, so the cached token lands
+exactly where the automated runs look for it.
 
 ### Under the automated timer
 
 `dayz-update.timer` runs with no TTY. With a valid cached token the update runs
 unattended. If the account requires Guard and no token is cached yet, the run
-fails fast and tells you to run `sudo dayzops steam-login` once. The same
-applies if the token later expires or Steam invalidates the session (e.g. after
-a password change) — re-running `steam-login` refreshes the cache. Treat this as
+fails fast and tells you to run `sudo dayzops steam-login` once. The same applies
+if the token later expires or Steam invalidates the session (e.g. after a
+password change) — re-running `steam-login` refreshes the cache. Treat this as
 occasional maintenance, not a tool failure.
+
+## How DayZops handles failures
+
+SteamCMD is the one external dependency that can misbehave (bad credentials,
+rate limits, network stalls, interactive prompts). DayZops wraps it in three
+layers so a run never hangs on a blinking cursor:
+
+1. **Preflight.** Before invoking SteamCMD, DayZops checks the obvious: the
+   binary exists, a password is configured, and the system clock is NTP-synced.
+   A failure here aborts with a clear instruction and never starts the process.
+2. **No interactive stdin.** Under `apply` / `update` / timer, SteamCMD runs with
+   stdin closed, so it cannot block waiting for a password or Guard code it will
+   never receive. (The interactive `steam-login` path keeps the terminal.)
+3. **Inactivity watchdog.** If SteamCMD produces no output for a configurable
+   window (default 120s), DayZops terminates it and reports an actionable error
+   instead of waiting forever. A real download — which streams progress — is
+   never affected.
 
 ## Configuration
 
-The configuration file lives at `/srv/dayz/config/server.yaml`.
+The configuration file lives at `/srv/dayz/config/server.yaml`. A fresh one is
+generated by the installer (or `dayzops render-config`):
 
 ```yaml
 server:
-  name: "My Chernarus Server"
+  name: "Chernarus Vanilla++"
   map: chernarus
   port: 2302
+  max_players: 60
+  # Optional launch flags (Bohemia wiki). null/omitted = flag not passed.
+  cpu_count: null          # int.  -cpuCount=N
+  limit_fps: null          # int 1-200.  -limitFPS=N
+  file_patching: false     # bool. -filePatching (mod development only)
+  extra_args: []           # list[str]. Flags not covered above
 
 steam:
-  username: "your_steam_username"   # password is NOT stored here (see above)
+  username: "USERNAME"     # password is NOT stored here (see Steam authentication)
 
 instance:
-  config: serverDZ.cfg
+  profile: "profiles"      # -profiles={install_dir}/{profile}
+  config: "serverDZ.cfg"
+
+network:
+  steam_query_port: 27016
 
 paths:
   install_dir: /srv/dayz/server
@@ -147,26 +178,52 @@ paths:
   mods_dir: /srv/dayz/server
   backups_dir: /srv/dayz/backups
   state_dir: /srv/dayz/state
+  storage_dir: null        # if set, -storage=path. null = DayZ default
+  steamcmd_bin: null       # if set, pin the SteamCMD binary. null = auto-detect
 
-mods:                               # order = load order
-  - id: 1559212036
-    name: "@CF"
+mods: []                   # order = load order
 servermods: []
 
+managed_files:
+  - source: "profiles"
+    backup: true
+
+managed_dirs:
+  - path: "profiles"
+    backup: true
+
 backup:
+  enabled: true
   retention_days: 14
+  keep_daily: 7
+  keep_weekly: 4
 
 updates:
+  enabled: true
   schedule: "04:00"
-  prune_schedule: "05:00"
+
+healthcheck:
+  enabled: true
+  startup_timeout: 300
+
+state:
+  inventory_enabled: true
 ```
 
 **Required fields:** `server.name`, `server.map`, `server.port`,
-`steam.username`, and all of `paths.*`. Validate after editing:
+`steam.username`, and `paths.install_dir` / `mods_dir` / `workshop_dir` /
+`backups_dir` / `state_dir`. Unknown keys are ignored, so adding optional fields
+will not break validation. Validate after editing:
 
 ```
 dayzops validate-config
 ```
+
+### `paths.steamcmd_bin`
+
+Optional. Leave it `null` and DayZops auto-detects the SteamCMD binary
+(`/srv/dayz/steamcmd/steamcmd.sh`, then the PATH). Set an absolute path only if
+SteamCMD lives somewhere non-standard.
 
 ## Usage
 
@@ -219,32 +276,50 @@ back up — the server is never left in an unusable state.
 
 ## Command reference
 
-| Command                               | Description                                 |
-| ------------------------------------- | ------------------------------------------- |
-| `dayzops version`                     | Print version                               |
-| `dayzops validate-config`             | Validate `server.yaml`                      |
-| `dayzops status`                      | Show service, mod count, last update/backup |
-| `dayzops apply [--dry-run]`           | Reconcile the system with the config        |
-| `dayzops update`                      | Atomic update with rollback                 |
+| Command                               | Description                                     |
+| ------------------------------------- | ----------------------------------------------- |
+| `dayzops version`                     | Print version                                   |
+| `dayzops validate-config`             | Validate `server.yaml`                          |
+| `dayzops status`                      | Show service, mod count, last update/backup     |
+| `dayzops apply [--dry-run]`           | Reconcile the system with the config            |
+| `dayzops update`                      | Atomic update with rollback                     |
 | `dayzops steam-login`                 | One-time interactive Steam login (caches Guard) |
-| `dayzops backup`                      | Create a backup                             |
-| `dayzops rollback`                    | Restore the latest backup                   |
-| `dayzops prune`                       | Remove backups past retention               |
-| `dayzops start` / `stop` / `restart`  | Control the service                         |
-| `dayzops mod list` / `add` / `remove` | Manage the mod list                         |
-| `dayzops render-config`               | Render a default `server.yaml`              |
+| `dayzops backup`                      | Create a backup                                 |
+| `dayzops rollback`                    | Restore the latest backup                       |
+| `dayzops prune`                       | Remove backups past retention                   |
+| `dayzops start` / `stop` / `restart`  | Control the service                             |
+| `dayzops mod list` / `add` / `remove` | Manage the mod list                             |
+| `dayzops render-config`               | Render a default `server.yaml`                  |
 
 Use `-c PATH` (before the command) to point at a config other than the default,
 e.g. `dayzops -c ./server.yaml validate-config`.
+
+## Uninstall
+
+```
+sudo ./scripts/uninstall.sh           # remove service, units, package, env file
+sudo ./scripts/uninstall.sh --purge   # the above + delete /srv/dayz and the user
+sudo ./scripts/uninstall.sh --purge --yes   # non-interactive (skip confirmation)
+```
+
+The default removal stops and disables the service and timers, removes the
+systemd units, deletes the `dayzops` command (the `/usr/local/bin` symlink and
+the virtualenv) and removes `/etc/dayzops.env` (which holds the Steam password),
+but **preserves** your data under `/srv/dayz` (config, server install, mods,
+backups, state). `--purge` additionally deletes `/srv/dayz` and the `dayz` system
+user; it asks for confirmation unless `--yes` is given. The script is idempotent.
+
+The `i386` architecture / `multilib` repo enabled at install time are left in
+place, since other software may rely on them; remove them manually if you want.
 
 ## Troubleshooting
 
 ### `Package 'steamcmd' has no installation candidate`
 
-You are installing SteamCMD from distro packages, which DayZops avoids on
-purpose — it is not in the default repository on any supported distro. Let the
-installer fetch the official tarball (`sudo ./scripts/install.sh`), or install
-it manually into `/srv/dayz/steamcmd`.
+You are installing SteamCMD from distro packages, which DayZops avoids on purpose
+— it is not in the default repository on any supported distro. Let the installer
+fetch the official tarball (`sudo ./scripts/install.sh`), or install it manually
+into `/srv/dayz/steamcmd`.
 
 ### `pip: command not found` / `externally-managed-environment`
 
@@ -257,8 +332,16 @@ interpreter (`/srv/dayz/.venv/bin/dayzops`).
 
 An older build invoked SteamCMD by bare name, which `sudo`'s restricted
 `secure_path` cannot resolve. Current DayZops uses the absolute path it
-auto-detects (`/srv/dayz/steamcmd/steamcmd.sh`). Re-install
-(`sudo ./scripts/install.sh`) so the binary exists at that path.
+auto-detects (`/srv/dayz/steamcmd/steamcmd.sh`) or `paths.steamcmd_bin`.
+Re-install (`sudo ./scripts/install.sh`) so the binary exists at that path.
+
+### The download seems stuck / `Cached credentials not found`
+
+SteamCMD has no cached token and is trying to log in. If the log shows
+`+login ***` with a **single** `***`, the password was not found — see below.
+With the password set, the log shows `+login *** ***` (account and password both
+redacted). DayZops will not hang here: missing credentials abort in preflight,
+and an unresponsive process is killed by the inactivity watchdog.
 
 ### Login problems
 
@@ -270,10 +353,10 @@ auto-detects (`/srv/dayz/steamcmd/steamcmd.sh`). Re-install
 - **`No subscription`** — the account does not own DayZ; the server build is only
   available to accounts that own the game.
 - **The account requires Steam Guard** — run `sudo dayzops steam-login` once to
-  cache the token (see *Steam authentication* above).
+  cache the token (see *Steam authentication*).
 - **Login fails with the password correct** — check the system clock; an
-  out-of-sync clock breaks the Steam handshake. Run
-  `sudo timedatectl set-ntp true` and confirm `System clock synchronized: yes`.
+  out-of-sync clock breaks the Steam handshake. Run `sudo timedatectl set-ntp
+  true` and confirm `System clock synchronized: yes`.
 
 ### `Pending kernel upgrade`
 
@@ -303,13 +386,13 @@ mods keys backups
 
 ```
 /srv/dayz
-├── .venv/       # virtualenv com o pacote dayzops
+├── .venv/       # virtualenv with the dayzops package
 ├── backups/     # timestamped .tar.gz backups
 ├── config/      # server.yaml
-├── logs/        # logs do dayzops
+├── logs/        # dayzops logs
 ├── server/      # DayZ dedicated server install (+ @mod symlinks, keys/)
 ├── state/       # generated state inventory (JSON)
-├── steamcmd/    # SteamCMD (tarball oficial da Valve)
+├── steamcmd/    # SteamCMD (Valve's official tarball)
 └── workshop/    # downloaded Workshop content
 ```
 
