@@ -277,6 +277,12 @@ configure_serverdz_cfg() {
     local port qport
     port="$(_yaml_value port)";            port="${port:-2302}"
     qport="$(_yaml_value steam_query_port)"; qport="${qport:-27016}"
+    # O serverDZ.cfg do DayZ frequentemente NÃO termina com newline. Sem isso,
+    # 'echo >>' grudaria a primeira linha nova no '};' final (ex.:
+    # '};clientPort = 2302;'), quebrando o parsing. Garante a quebra antes.
+    if [[ -s "${cfg}" && -n "$(tail -c1 "${cfg}")" ]]; then
+        printf '\n' >> "${cfg}"
+    fi
     if ! grep -qE '^[[:space:]]*clientPort[[:space:]]*=' "${cfg}"; then
         echo "clientPort = ${port};" >> "${cfg}"
         log "serverDZ.cfg: clientPort = ${port}; adicionado"
