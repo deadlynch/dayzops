@@ -107,10 +107,12 @@ install_deps() {
 }
 
 # 4) SteamCMD via tarball oficial (portável entre distros).
-#    Instalado em ${STEAMCMD_DIR}, de posse do usuário de serviço. Um wrapper
-#    em /usr/local/bin/steamcmd garante que o binário resolva mesmo sob o
-#    secure_path restrito do sudo, e força a execução como ${DAYZ_USER} (nunca
-#    root — evita ~/.steam de dono root, que quebra updates futuros).
+#    Instalado em ${STEAMCMD_DIR}, de posse do usuário de serviço. O dayzops
+#    descobre esse caminho sozinho (steamcmd._default_steamcmd_path procura
+#    ${STEAMCMD_DIR}/steamcmd.sh primeiro) ou via paths.steamcmd_bin no
+#    server.yaml — então NÃO precisa de wrapper em /usr/local/bin nem depender
+#    do PATH do sudo. O steamcmd é sempre executado como ${DAYZ_USER} pelo
+#    próprio dayzops (sudo -H -u ${DAYZ_USER}), evitando ~/.steam de dono root.
 install_steamcmd() {
     log "instalando SteamCMD em ${STEAMCMD_DIR}"
     as_dayz mkdir -p "${STEAMCMD_DIR}"
@@ -122,20 +124,6 @@ install_steamcmd() {
     # de forma benigna nesse primeiro update, então não abortamos por isso.
     as_dayz "${STEAMCMD_DIR}/steamcmd.sh" +quit \
         || log "AVISO: primeira execução do SteamCMD retornou erro (normal no self-update inicial)"
-
-    log "criando wrapper /usr/local/bin/steamcmd"
-    cat > /usr/local/bin/steamcmd <<EOF
-#!/usr/bin/env bash
-# Gerado pelo instalador do dayzops. Resolve o SteamCMD e o roda como
-# ${DAYZ_USER}. Se invocado como root (ex.: via sudo), dropa privilégio.
-set -euo pipefail
-TARGET="${STEAMCMD_DIR}/steamcmd.sh"
-if [[ "\${EUID}" -eq 0 ]]; then
-    exec runuser -u "${DAYZ_USER}" -- "\${TARGET}" "\$@"
-fi
-exec "\${TARGET}" "\$@"
-EOF
-    chmod 755 /usr/local/bin/steamcmd
 }
 
 # 5) Pacote dayzops em uma virtualenv dedicada.
@@ -147,6 +135,7 @@ install_package() {
     python3 -m venv "${VENV}"
     "${VENV}/bin/pip" install --upgrade pip >/dev/null
     "${VENV}/bin/pip" install "${REPO_ROOT}"
+    mkdir -p /usr/local/bin
     ln -sf "${VENV}/bin/dayzops" /usr/local/bin/dayzops
     command -v dayzops >/dev/null || die "dayzops não ficou disponível no PATH após a instalação"
 }
