@@ -26,6 +26,10 @@ paths:
   backups_dir: {{DAYZ_HOME}}/backups
   state_dir: {{DAYZ_HOME}}/state
   storage_dir: null        # Se setado, vira -storage=path. Default null = padrão DayZ.
+  # Caminho do binário do SteamCMD. Omitir/null = auto-detecta
+  # ({{DAYZ_HOME}}/steamcmd/steamcmd.sh e depois o PATH). Só precisa setar se
+  # você instalou o SteamCMD em um lugar fora do padrão.
+  steamcmd_bin: null
 
 mods: []
 
