@@ -207,6 +207,130 @@ fix_ownership() {
     chown -R "${DAYZ_USER}:${DAYZ_USER}" "${DAYZ_HOME}"
 }
 
+# --- Provisionamento interativo (credenciais, apply e serverDZ.cfg) ----------
+# Roda só com terminal (TTY) e quando não está em modo não-interativo. Em
+# automação/CI (DAYZOPS_NONINTERACTIVE=1 ou sem TTY) imprime os passos manuais
+# e não bloqueia. Tudo idempotente.
+
+# Lê o valor atual de uma chave simples do server.yaml (1ª ocorrência).
+_yaml_value() {
+    local key="$1"
+    grep -oP "^\s*${key}:\s*\"?\K[^\"]*" "${CONFIG}" 2>/dev/null | head -1
+}
+
+set_username() {
+    local current new
+    current="$(_yaml_value username)"
+    if [[ -n "${current}" && "${current}" != "USERNAME" ]]; then
+        read -r -p "Usuário Steam atual é '${current}'. Trocar? (deixe vazio p/ manter): " new || new=""
+    else
+        read -r -p "Usuário Steam (conta que POSSUI o DayZ): " new || new=""
+    fi
+    [[ -z "${new}" ]] && { log "usuário Steam mantido: '${current:-<vazio>}'"; return; }
+    # Substitui o valor da chave username (sob steam:). Usernames do Steam são
+    # alfanuméricos, então sem necessidade de escaping pesado.
+    sed -i -E "s|^([[:space:]]*username:[[:space:]]*).*|\1\"${new}\"|" "${CONFIG}"
+    chown "${DAYZ_USER}:${DAYZ_USER}" "${CONFIG}"
+    log "usuário Steam definido: '${new}'"
+}
+
+set_password() {
+    local has_pw pw pw2
+    has_pw="$(grep -E '^[[:space:]]*DAYZOPS_STEAM_PASSWORD=.+' /etc/dayzops.env 2>/dev/null || true)"
+    if [[ -n "${has_pw}" ]]; then
+        local ans
+        read -r -p "Senha do Steam já configurada. Trocar? (s/N): " ans || ans=""
+        [[ "${ans}" != "s" && "${ans}" != "S" ]] && { log "senha mantida"; return; }
+    fi
+    while :; do
+        read -rs -p "Senha do Steam (não aparece ao digitar): " pw; echo
+        [[ -z "${pw}" ]] && { echo "  senha vazia — tente de novo."; continue; }
+        read -rs -p "Confirme a senha: " pw2; echo
+        [[ "${pw}" == "${pw2}" ]] && break
+        echo "  as senhas não conferem — tente de novo."
+    done
+    # Reescreve o env file preservando o cabeçalho. Valor cru (sem aspas) é o
+    # formato lido tanto pelo systemd EnvironmentFile quanto pelo parser do
+    # dayzops. Senhas com espaços/aspas nas pontas são casos de borda: edite à
+    # mão se for o caso.
+    umask 077
+    {
+        echo "# Senha do Steam usada pelo SteamCMD (lida pelo dayz-update.service)."
+        echo "# O servidor DayZ (app 223350) NÃO aceita login anônimo — conta dona do jogo."
+        echo "# NÃO versione este arquivo."
+        echo "DAYZOPS_STEAM_PASSWORD=${pw}"
+    } > /etc/dayzops.env
+    chmod 600 /etc/dayzops.env
+    chown "${DAYZ_USER}:${DAYZ_USER}" /etc/dayzops.env
+    log "senha gravada em /etc/dayzops.env (modo 600)"
+}
+
+# Acrescenta clientPort/steamQueryPort ao serverDZ.cfg, sem duplicar. Lê as
+# portas do server.yaml para manter consistência. Só roda se o cfg existir
+# (ele só é criado pelo 'dayzops apply').
+configure_serverdz_cfg() {
+    local cfg="${DAYZ_HOME}/server/serverDZ.cfg"
+    if [[ ! -f "${cfg}" ]]; then
+        log "AVISO: ${cfg} ainda não existe (o servidor não foi baixado?); pulei o ajuste do cfg"
+        return
+    fi
+    local port qport
+    port="$(_yaml_value port)";            port="${port:-2302}"
+    qport="$(_yaml_value steam_query_port)"; qport="${qport:-27016}"
+    if ! grep -qE '^[[:space:]]*clientPort[[:space:]]*=' "${cfg}"; then
+        echo "clientPort = ${port};" >> "${cfg}"
+        log "serverDZ.cfg: clientPort = ${port}; adicionado"
+    fi
+    if ! grep -qE '^[[:space:]]*steamQueryPort[[:space:]]*=' "${cfg}"; then
+        echo "steamQueryPort = ${qport};" >> "${cfg}"
+        log "serverDZ.cfg: steamQueryPort = ${qport}; adicionado"
+    fi
+    chown "${DAYZ_USER}:${DAYZ_USER}" "${cfg}"
+}
+
+print_manual_steps() {
+    cat <<EOF
+
+[install] Modo não-interativo. Para finalizar, rode manualmente:
+  1. Usuário Steam:   sudo nano ${CONFIG}        (campo steam.username)
+  2. Senha do Steam:  sudo nano /etc/dayzops.env (DAYZOPS_STEAM_PASSWORD=, sem #)
+  3. Valide:          dayzops validate-config
+  4. Baixe o server:  sudo dayzops apply
+  5. Ajuste o cfg:    sudo nano ${DAYZ_HOME}/server/serverDZ.cfg
+                      (clientPort/steamQueryPort — só existe após o passo 4)
+EOF
+}
+
+provision_interactive() {
+    if [[ -n "${DAYZOPS_NONINTERACTIVE:-}" || ! -t 0 ]]; then
+        print_manual_steps
+        return
+    fi
+    echo
+    log "--- Configuração do servidor (interativa) ---"
+    set_username
+    set_password
+
+    if dayzops validate-config >/dev/null 2>&1; then
+        log "server.yaml válido"
+    else
+        log "AVISO: validate-config acusou problemas; revise ${CONFIG} antes do apply"
+    fi
+
+    local ans
+    read -r -p "Baixar e instalar o servidor DayZ agora? (~2-3 GB) (S/n): " ans || ans=""
+    if [[ "${ans}" == "n" || "${ans}" == "N" ]]; then
+        log "pulei o 'dayzops apply'. Rode 'sudo dayzops apply' quando quiser."
+        return
+    fi
+    if dayzops apply; then
+        configure_serverdz_cfg
+        log "servidor instalado e serverDZ.cfg ajustado."
+    else
+        log "AVISO: 'dayzops apply' falhou (veja a mensagem acima). Corrija e rode de novo."
+    fi
+}
+
 main() {
     require_root
     detect_distro
@@ -220,7 +344,8 @@ main() {
     create_env_file
     enable_updates
     fix_ownership
-    log "concluído. Edite ${CONFIG} (usuário Steam e mods) e /etc/dayzops.env (senha), depois rode: dayzops validate-config"
+    provision_interactive
+    log "concluído."
 }
 
 main "$@"
