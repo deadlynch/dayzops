@@ -29,6 +29,32 @@ ENV_FILE_PATH = "/etc/dayzops.env"
 # Ex.: Success. Downloaded item 123 to "/srv/dayz/.steam/.../123" (N bytes)
 _DOWNLOAD_PATH = re.compile(r'Downloaded item \d+ to "([^"]+)"')
 
+# Caminhos onde o binário do SteamCMD costuma estar, em ordem de preferência.
+# O DayZops instala via tarball oficial em <DAYZ_HOME>/steamcmd/steamcmd.sh,
+# então esse é o primeiro candidato. NUNCA confiar só no nome "steamcmd" no
+# PATH: sob 'sudo -u dayz' o secure_path filtra o ambiente e o comando some.
+DEFAULT_STEAMCMD_PATHS = (
+    "/srv/dayz/steamcmd/steamcmd.sh",   # instalação padrão do dayzops
+    "/usr/games/steamcmd",              # pacote apt (Debian/Ubuntu, multiverse)
+    "steamcmd",                         # último recurso: resolver pelo PATH
+)
+
+
+def _default_steamcmd_path() -> str:
+    """Primeiro caminho de SteamCMD existente/resolvível.
+
+    Para candidatos com '/', exige que o arquivo exista; para um nome simples,
+    resolve via PATH. Se nada for encontrado, devolve o último (nome cru) para
+    preservar a mensagem de erro histórica em vez de estourar aqui.
+    """
+    for cand in DEFAULT_STEAMCMD_PATHS:
+        if "/" in cand:
+            if Path(cand).is_file():
+                return cand
+        elif shutil.which(cand):
+            return cand
+    return DEFAULT_STEAMCMD_PATHS[-1]
+
 
 def _read_password_from_env_file(path: str | None = None) -> str | None:
     """Lê DAYZOPS_STEAM_PASSWORD de um EnvironmentFile (formato 'KEY=value').
@@ -81,13 +107,17 @@ class SteamCmd:
         self,
         username: str,
         *,
-        steamcmd_path: str = "steamcmd",
+        steamcmd_path: str | None = None,
         timeout: int = 1800,
         runner=None,
         run_as: str | None = None,
     ):
         self.username = username
-        self.steamcmd_path = steamcmd_path
+        # steamcmd_path=None => auto-detecta o caminho absoluto do binário.
+        # Passar um valor explícito (ex.: vindo de paths.steamcmd_bin no
+        # server.yaml) tem precedência. Nunca cai no nome cru "steamcmd"
+        # a menos que nenhum caminho conhecido exista.
+        self.steamcmd_path = steamcmd_path or _default_steamcmd_path()
         self.timeout = timeout
         # Usuário de serviço sob o qual o steamcmd deve rodar. Quando o DayZops
         # está como root, baixar como root joga o conteúdo do Workshop em
@@ -97,6 +127,9 @@ class SteamCmd:
         self._runner = runner or self._default_runner
 
     def is_available(self) -> bool:
+        # Caminho absoluto: basta o arquivo existir. Nome simples: via PATH.
+        if "/" in self.steamcmd_path:
+            return Path(self.steamcmd_path).is_file()
         return shutil.which(self.steamcmd_path) is not None
 
     def _wrap_as_user(self, command: list[str]) -> list[str]:
@@ -130,10 +163,29 @@ class SteamCmd:
         return self._wrap_as_user(base)
 
     def _redact(self, command: list[str]) -> list[str]:
+        """Redige credenciais para o log: a senha e o usuário do +login.
+
+        A senha é trocada por '***' onde quer que apareça. O usuário não é um
+        valor fixo conhecido aqui de forma segura (pode coincidir com outros
+        args), então redigimos posicionalmente: o argumento imediatamente após
+        '+login' é sempre o username.
+        """
         password = _resolve_password()
-        if not password:
-            return command
-        return ["***" if part == password else part for part in command]
+        out: list[str] = []
+        redact_next = False
+        for part in command:
+            if redact_next:
+                out.append("***")
+                redact_next = False
+                continue
+            if part == "+login":
+                out.append(part)
+                redact_next = True          # o próximo arg é o username
+            elif password and part == password:
+                out.append("***")
+            else:
+                out.append(part)
+        return out
 
     def _default_runner(self, command: list[str]):
         """Roda o steamcmd repassando stdout/stderr em tempo real ao terminal.
